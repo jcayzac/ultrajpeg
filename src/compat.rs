@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+
 use crate::{
     codec::{decode_primary_image, encode_image},
     container::assemble_container,
-    decode_with_options,
     error::{Error, Result},
+    inspect,
     metadata::build_ultra_hdr_metadata,
-    types::{ChromaSubsampling, ColorMetadata, DecodeOptions},
+    types::{ChromaSubsampling, ColorMetadata},
 };
 use ultrahdr_core::{
     ColorGamut as CoreColorGamut, ColorTransfer as CoreColorTransfer, GainMapConfig,
@@ -56,23 +58,39 @@ pub mod sys {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct CompressedImage {
-    bytes: Vec<u8>,
+pub struct CompressedImage<'a> {
+    bytes: Cow<'a, [u8]>,
     color_gamut: ColorGamut,
     color_transfer: ColorTransfer,
     color_range: ColorRange,
 }
 
-impl CompressedImage {
+impl<'a> CompressedImage<'a> {
     #[must_use]
     pub fn from_bytes(
-        bytes: &mut [u8],
+        bytes: &'a mut [u8],
         color_gamut: ColorGamut,
         color_transfer: ColorTransfer,
         color_range: ColorRange,
     ) -> Self {
         Self {
-            bytes: bytes.to_vec(),
+            bytes: Cow::Borrowed(bytes),
+            color_gamut,
+            color_transfer,
+            color_range,
+        }
+    }
+
+    /// Build an owned compressed image without borrowing the caller's buffer.
+    #[must_use]
+    pub fn from_vec(
+        bytes: Vec<u8>,
+        color_gamut: ColorGamut,
+        color_transfer: ColorTransfer,
+        color_range: ColorRange,
+    ) -> Self {
+        Self {
+            bytes: Cow::Owned(bytes),
             color_gamut,
             color_transfer,
             color_range,
@@ -82,22 +100,22 @@ impl CompressedImage {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct RawImage {
+pub struct RawImage<'a> {
     format: ImageFormat,
     width: u32,
     height: u32,
-    data: Vec<u8>,
+    data: Cow<'a, [u8]>,
     color_gamut: ColorGamut,
     color_transfer: ColorTransfer,
     color_range: ColorRange,
 }
 
-impl RawImage {
+impl<'a> RawImage<'a> {
     pub fn packed(
         format: ImageFormat,
         width: u32,
         height: u32,
-        bytes: &mut [u8],
+        bytes: &'a mut [u8],
         color_gamut: ColorGamut,
         color_transfer: ColorTransfer,
         color_range: ColorRange,
@@ -124,7 +142,45 @@ impl RawImage {
             format,
             width,
             height,
-            data: bytes.to_vec(),
+            data: Cow::Borrowed(bytes),
+            color_gamut,
+            color_transfer,
+            color_range,
+        })
+    }
+
+    /// Build an owned packed image without borrowing the caller's buffer.
+    pub fn packed_owned(
+        format: ImageFormat,
+        width: u32,
+        height: u32,
+        bytes: Vec<u8>,
+        color_gamut: ColorGamut,
+        color_transfer: ColorTransfer,
+        color_range: ColorRange,
+    ) -> Result<Self> {
+        let expected_len = width
+            .checked_mul(height)
+            .and_then(|pixel_count| pixel_count.checked_mul(4))
+            .ok_or_else(|| Error::InvalidInput("raw image dimensions overflow".into()))?
+            as usize;
+        if bytes.len() != expected_len {
+            return Err(Error::InvalidInput(format!(
+                "raw image byte length mismatch: expected {expected_len}, got {}",
+                bytes.len()
+            )));
+        }
+        if format != sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102 {
+            return Err(Error::UnsupportedFormat(
+                "only packed RGBA1010102 raw images are supported",
+            ));
+        }
+
+        Ok(Self {
+            format,
+            width,
+            height,
+            data: Cow::Owned(bytes),
             color_gamut,
             color_transfer,
             color_range,
@@ -174,16 +230,16 @@ impl DecodedPacked {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Encoder {
-    hdr_raw: Option<RawImage>,
-    sdr_image: Option<CompressedImage>,
+pub struct Encoder<'a> {
+    hdr_raw: Option<RawImage<'a>>,
+    sdr_image: Option<CompressedImage<'a>>,
     base_quality: u8,
     gain_map_quality: u8,
     output_format: Codec,
     encoded: Option<EncodedStream>,
 }
 
-impl Encoder {
+impl<'a> Encoder<'a> {
     pub fn new() -> Result<Self> {
         Ok(Self {
             base_quality: 90,
@@ -193,7 +249,11 @@ impl Encoder {
         })
     }
 
-    pub fn set_raw_image(&mut self, image: &mut RawImage, label: ImgLabel) -> Result<&mut Self> {
+    pub fn set_raw_image(
+        &mut self,
+        image: &mut RawImage<'a>,
+        label: ImgLabel,
+    ) -> Result<&mut Self> {
         if label != ImgLabel::UHDR_HDR_IMG {
             return Err(Error::InvalidInput(format!(
                 "unsupported raw image label {label:?}"
@@ -205,7 +265,7 @@ impl Encoder {
 
     pub fn set_compressed_image(
         &mut self,
-        image: &mut CompressedImage,
+        image: &mut CompressedImage<'a>,
         label: ImgLabel,
     ) -> Result<&mut Self> {
         if label != ImgLabel::UHDR_SDR_IMG {
@@ -258,7 +318,7 @@ impl Encoder {
             .ok_or_else(|| Error::InvalidInput("missing SDR compressed image".into()))?;
 
         let hdr_core = compat_raw_to_core(hdr_raw)?;
-        let sdr_core = decode_primary_image(&sdr.bytes)?;
+        let sdr_core = decode_primary_image(sdr.bytes.as_ref())?;
         let (gain_map, metadata) =
             compute_gainmap(&hdr_core, &sdr_core, &GainMapConfig::default(), Unstoppable)?;
         let gain_map_core = CoreRawImage::from_data(
@@ -278,7 +338,7 @@ impl Encoder {
         )?;
         let ultra_hdr_metadata = build_ultra_hdr_metadata(&metadata, gain_map_jpeg.len());
         let bytes = assemble_container(
-            &sdr.bytes,
+            sdr.bytes.as_ref(),
             Some(&gain_map_jpeg),
             &ColorMetadata {
                 icc_profile: None,
@@ -298,16 +358,16 @@ impl Encoder {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Decoder {
-    image: Option<CompressedImage>,
+pub struct Decoder<'a> {
+    image: Option<CompressedImage<'a>>,
 }
 
-impl Decoder {
+impl<'a> Decoder<'a> {
     pub fn new() -> Result<Self> {
         Ok(Self::default())
     }
 
-    pub fn set_image(&mut self, image: &mut CompressedImage) -> Result<&mut Self> {
+    pub fn set_image(&mut self, image: &mut CompressedImage<'a>) -> Result<&mut Self> {
         self.image = Some(image.clone());
         Ok(self)
     }
@@ -317,13 +377,8 @@ impl Decoder {
             .image
             .as_ref()
             .ok_or_else(|| Error::InvalidInput("missing compressed image".into()))?;
-        let decoded = decode_with_options(
-            &image.bytes,
-            DecodeOptions {
-                decode_gain_map: false,
-            },
-        )?;
-        Ok(decoded
+        let inspected = inspect(image.bytes.as_ref())?;
+        Ok(inspected
             .ultra_hdr
             .and_then(|metadata| metadata.gain_map_metadata))
     }
@@ -343,7 +398,7 @@ impl Decoder {
             .image
             .as_ref()
             .ok_or_else(|| Error::InvalidInput("missing compressed image".into()))?;
-        let decoded = crate::decode(&image.bytes)?;
+        let decoded = crate::decode(image.bytes.as_ref())?;
         let display_boost = decoded
             .ultra_hdr
             .as_ref()
@@ -451,7 +506,7 @@ pub mod mozjpeg {
     pub use super::jpeg::{Encoder, Preset};
 }
 
-fn compat_raw_to_core(raw: &RawImage) -> Result<CoreRawImage> {
+fn compat_raw_to_core(raw: &RawImage<'_>) -> Result<CoreRawImage> {
     Ok(CoreRawImage::from_data(
         raw.width,
         raw.height,
@@ -471,7 +526,7 @@ fn compat_raw_to_core(raw: &RawImage) -> Result<CoreRawImage> {
         },
         core_gamut_from_compat(raw.color_gamut)?,
         core_transfer_from_compat(raw.color_transfer)?,
-        raw.data.clone(),
+        raw.data.as_ref().to_vec(),
     )?)
 }
 

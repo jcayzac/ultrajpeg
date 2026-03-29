@@ -8,6 +8,7 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 
 ### Decode
 
+- Inspect container metadata without decoding image pixels
 - Decode a primary JPEG image into pixels
 - Extract ICC profiles and EXIF payloads
 - Extract explicit color metadata stored by `ultrajpeg`
@@ -59,6 +60,7 @@ The crate is split into layers:
 
 The public high-level API lives in:
 
+- `ultrajpeg::inspect`
 - `ultrajpeg::decode`
 - `ultrajpeg::decode_with_options`
 - `ultrajpeg::encode`
@@ -91,7 +93,7 @@ assert_eq!(decoded.primary_image.width, 8);
 
 ## Decode Example
 
-```rust
+```rust,no_run
 use ultrajpeg::decode;
 
 let bytes = std::fs::read("image.jpg")?;
@@ -102,6 +104,22 @@ println!(
     decoded.primary_image.width,
     decoded.primary_image.height,
     decoded.gain_map.is_some()
+);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## Metadata-Only Inspection
+
+```rust,no_run
+use ultrajpeg::inspect;
+
+let bytes = std::fs::read("image.jpg")?;
+let inspected = inspect(&bytes)?;
+
+println!(
+    "primary_bytes={}, gain_map_bytes={:?}",
+    inspected.primary_jpeg_len,
+    inspected.gain_map_jpeg_len
 );
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -166,8 +184,10 @@ The repository includes:
 
 - checked-in fixture vectors in [`tests/fixtures/`](/Users/julien.cayzac/github/jcayzac/ultrajpeg/tests/fixtures)
 - fixture-backed integration tests for SDR JPEG and UltraHDR JPEG decode paths
+- metadata-only integration tests for plain JPEG and UltraHDR marker parsing
 - encode/decode round-trip integration tests for the high-level API
 - compatibility tests for the wrapper APIs
+- representative Criterion benchmarks in `benches/typical.rs`
 
 Fixture vectors currently cover:
 
@@ -185,7 +205,15 @@ This crate currently targets the scenarios implemented in the public API and com
 The repository includes an `xtask` helper for tagged releases:
 
 ```bash
-cargo run -p xtask -- release
+cargo release
 ```
 
 It reads `package.version` from the root `Cargo.toml`, requires a clean working tree, creates the matching `v{version}` git tag, and pushes that tag to `origin`.
+
+## Benchmarking
+
+Run the representative benchmark suite with:
+
+```bash
+cargo bench --bench typical
+```

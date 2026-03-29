@@ -14,12 +14,12 @@ pub use compat::{
 pub use error::{Error, Result};
 pub use types::{
     ChromaSubsampling, ColorMetadata, DecodeOptions, DecodedGainMap, DecodedJpeg, EncodeOptions,
-    GainMapEncodeOptions, UltraHdrMetadata, UltraJpegEncoder,
+    GainMapEncodeOptions, InspectedJpeg, UltraHdrMetadata, UltraJpegEncoder,
 };
 pub use ultrahdr_core::GainMapMetadata;
 
 use codec::{decode_gain_map, decode_primary_image, encode_image};
-use container::{assemble_container, parse_container};
+use container::{assemble_container_owned, inspect_container, parse_container};
 use metadata::{build_ultra_hdr_metadata, parse_ultra_hdr_metadata};
 use ultrahdr_core::{RawImage as CoreRawImage, gainmap::HdrOutputFormat};
 
@@ -31,7 +31,7 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedJpeg> {
 /// Decode a JPEG or UltraHDR JPEG using explicit decode options.
 pub fn decode_with_options(bytes: &[u8], options: DecodeOptions) -> Result<DecodedJpeg> {
     let parsed = parse_container(bytes, &options)?;
-    let mut primary_image = decode_primary_image(&parsed.primary_jpeg)?;
+    let mut primary_image = decode_primary_image(parsed.primary_jpeg)?;
 
     if let Some(gamut) = parsed.color_metadata.gamut {
         primary_image.gamut = gamut;
@@ -43,11 +43,11 @@ pub fn decode_with_options(bytes: &[u8], options: DecodeOptions) -> Result<Decod
     let ultra_hdr = parse_ultra_hdr_metadata(parsed.xmp.as_deref(), parsed.iso.as_deref())?;
     let gain_map = match parsed.gain_map_jpeg {
         Some(gain_map_jpeg) if options.decode_gain_map => {
-            let mut decoded = decode_gain_map(&gain_map_jpeg)?;
+            let mut decoded = decode_gain_map(gain_map_jpeg)?;
             if let Some(ultra_hdr) = ultra_hdr.as_ref() {
                 decoded.metadata = ultra_hdr.gain_map_metadata.clone();
             }
-            decoded.jpeg_bytes = gain_map_jpeg;
+            decoded.jpeg_bytes = gain_map_jpeg.to_vec();
             Some(decoded)
         }
         _ => None,
@@ -55,10 +55,21 @@ pub fn decode_with_options(bytes: &[u8], options: DecodeOptions) -> Result<Decod
 
     Ok(DecodedJpeg {
         primary_image,
-        primary_jpeg: parsed.primary_jpeg,
+        primary_jpeg: parsed.primary_jpeg.to_vec(),
         color_metadata: parsed.color_metadata,
         ultra_hdr,
         gain_map,
+    })
+}
+
+/// Inspect JPEG or UltraHDR container metadata without decoding image pixels.
+pub fn inspect(bytes: &[u8]) -> Result<InspectedJpeg> {
+    let parsed = inspect_container(bytes)?;
+    Ok(InspectedJpeg {
+        primary_jpeg_len: parsed.primary_jpeg_len,
+        gain_map_jpeg_len: parsed.gain_map_jpeg_len,
+        color_metadata: parsed.color_metadata,
+        ultra_hdr: parse_ultra_hdr_metadata(parsed.xmp.as_deref(), parsed.iso.as_deref())?,
     })
 }
 
@@ -100,8 +111,8 @@ impl UltraJpegEncoder {
             None => (None, None),
         };
 
-        assemble_container(
-            &primary_jpeg,
+        assemble_container_owned(
+            primary_jpeg,
             gain_map_jpeg.as_deref(),
             &self.options.color_metadata,
             ultra_hdr_metadata.as_ref(),

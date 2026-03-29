@@ -83,7 +83,7 @@ fn decode_image(
     pixel_format: PixelFormat,
 ) -> Result<RawImage> {
     let options = DecoderOptions::default().jpeg_set_out_colorspace(colorspace);
-    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes.to_vec()), options);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     decoder.decode_headers()?;
     let (width, height) = decoder
         .dimensions()

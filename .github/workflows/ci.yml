@@ -39,3 +39,36 @@ jobs:
 
       - name: Doc
         run: cargo doc --workspace --all-features --no-deps
+
+  benchmark:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore Criterion state
+        id: criterion-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: target/criterion
+          key: criterion-${{ runner.os }}-${{ github.head_ref || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            criterion-${{ runner.os }}-${{ github.head_ref || github.ref_name }}-
+            criterion-${{ runner.os }}-${{ github.event.repository.default_branch }}-
+
+      - name: Benchmark
+        run: cargo bench --bench typical
+
+      - name: Save Criterion state
+        if: always() && !cancelled()
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: criterion-${{ runner.os }}-${{ github.head_ref || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}

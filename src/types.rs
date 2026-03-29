@@ -50,6 +50,15 @@ pub struct DecodedJpeg {
     pub gain_map: Option<DecodedGainMap>,
 }
 
+/// Metadata-only JPEG/UltraHDR inspection result.
+#[derive(Debug, Clone)]
+pub struct InspectedJpeg {
+    pub primary_jpeg_len: usize,
+    pub gain_map_jpeg_len: Option<usize>,
+    pub color_metadata: ColorMetadata,
+    pub ultra_hdr: Option<UltraHdrMetadata>,
+}
+
 /// Decode configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeOptions {
