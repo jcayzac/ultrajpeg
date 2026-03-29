@@ -29,7 +29,7 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 
 ### Compatibility Wrappers
 
-The crate also exposes a compatibility surface intended to replace the subset of `mozjpeg_rs` and `ultrahdr` currently used by `site-assets`.
+The crate also exposes compatibility wrappers for a small `mozjpeg_rs`-style JPEG encoding surface and an `ultrahdr`-style stateful encoding and decoding surface.
 
 - `ultrajpeg::jpeg` and `ultrajpeg::mozjpeg`
   - simple JPEG encoder wrapper with `Encoder::new`, `.quality`, `.icc_profile`, and `.encode_rgb`
@@ -167,7 +167,7 @@ The repository includes:
 - checked-in fixture vectors in [`tests/fixtures/`](/Users/julien.cayzac/github/jcayzac/ultrajpeg/tests/fixtures)
 - fixture-backed integration tests for SDR JPEG and UltraHDR JPEG decode paths
 - encode/decode round-trip integration tests for the high-level API
-- compatibility tests matching the `site-assets` client flow
+- compatibility tests for the wrapper APIs
 
 Fixture vectors currently cover:
 

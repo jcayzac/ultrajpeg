@@ -154,7 +154,7 @@ fn decode_options_can_skip_gain_map_decoding() {
 }
 
 #[test]
-fn compat_ultrahdr_api_matches_site_assets_flow() {
+fn compat_ultrahdr_api_matches_wrapper_flow() {
     let base = jpeg::Encoder::new(jpeg::Preset::ProgressiveSmallest)
         .quality(90)
         .encode_rgb(sample_primary().data.as_slice(), 4, 4)
