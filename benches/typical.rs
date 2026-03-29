@@ -1,11 +1,30 @@
+use std::{sync::LazyLock, time::Duration};
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ultrahdr_core::{ColorGamut, ColorTransfer, GainMapMetadata, PixelFormat, RawImage};
-use ultrajpeg::{CompressedImage, EncodeOptions, GainMapEncodeOptions, decode, inspect, jpeg, sys};
+use ultrajpeg::{
+    CompressedImage, DecodeOptions, EncodeOptions, GainMapEncodeOptions, decode,
+    decode_with_options, inspect, jpeg, sys,
+};
 
 const PLAIN_SDR: &[u8] = include_bytes!("../tests/fixtures/plain-sdr.jpg");
 const SAMPLE_ULTRAHDR: &[u8] = include_bytes!("../tests/fixtures/sample-ultrahdr.jpg");
+const LARGE_WIDTH: u32 = 2048;
+const LARGE_HEIGHT: u32 = 1536;
+
+static LARGE_CORPUS: LazyLock<BenchmarkCorpus> = LazyLock::new(build_large_corpus);
+
+struct BenchmarkCorpus {
+    plain: Vec<u8>,
+    ultrahdr: Vec<u8>,
+}
 
 fn typical_benches(c: &mut Criterion) {
+    fixture_benches(c);
+    realistic_benches(c, &LARGE_CORPUS);
+}
+
+fn fixture_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("inspect");
     for (name, bytes) in [("plain", PLAIN_SDR), ("ultrahdr", SAMPLE_ULTRAHDR)] {
         group.throughput(Throughput::Bytes(bytes.len() as u64));
@@ -24,8 +43,8 @@ fn typical_benches(c: &mut Criterion) {
     }
     group.finish();
 
-    let primary = sample_primary();
-    let gain_map = sample_gain_map();
+    let primary = sample_primary(4, 4);
+    let gain_map = sample_gain_map(4, 4);
     let gain_map_metadata = sample_gain_map_metadata();
 
     let mut group = c.benchmark_group("encode");
@@ -51,16 +70,16 @@ fn typical_benches(c: &mut Criterion) {
     group.bench_function("gainmap_metadata", |b| {
         b.iter_batched(
             || {
-                CompressedImage::from_vec(
-                    SAMPLE_ULTRAHDR.to_vec(),
+                CompressedImage::from_slice(
+                    SAMPLE_ULTRAHDR,
                     sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
                     sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
                     sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
                 )
             },
-            |mut compressed| {
+            |compressed| {
                 let mut decoder = ultrajpeg::Decoder::new().unwrap();
-                decoder.set_image(&mut compressed).unwrap();
+                decoder.set_image_owned(compressed).unwrap();
                 black_box(decoder.gainmap_metadata().unwrap());
             },
             criterion::BatchSize::SmallInput,
@@ -81,36 +100,133 @@ fn typical_benches(c: &mut Criterion) {
     group.finish();
 }
 
-fn sample_primary() -> RawImage {
+fn realistic_benches(c: &mut Criterion, corpus: &BenchmarkCorpus) {
+    let mut group = c.benchmark_group("realistic");
+    group.sample_size(20);
+    group.warm_up_time(Duration::from_secs(2));
+    group.measurement_time(Duration::from_secs(8));
+
+    group.throughput(Throughput::Bytes(corpus.plain.len() as u64));
+    group.bench_function("inspect_plain", |b| {
+        b.iter(|| inspect(black_box(corpus.plain.as_slice())).unwrap());
+    });
+    group.bench_function("decode_plain", |b| {
+        b.iter(|| decode(black_box(corpus.plain.as_slice())).unwrap());
+    });
+
+    group.throughput(Throughput::Bytes(corpus.ultrahdr.len() as u64));
+    group.bench_function("inspect_ultrahdr", |b| {
+        b.iter(|| inspect(black_box(corpus.ultrahdr.as_slice())).unwrap());
+    });
+    group.bench_function("decode_ultrahdr", |b| {
+        b.iter(|| decode(black_box(corpus.ultrahdr.as_slice())).unwrap());
+    });
+    group.bench_function("decode_ultrahdr_skip_gain_map", |b| {
+        b.iter(|| {
+            decode_with_options(
+                black_box(corpus.ultrahdr.as_slice()),
+                DecodeOptions {
+                    decode_gain_map: false,
+                },
+            )
+            .unwrap()
+        });
+    });
+    group.bench_function("compat_decode_packed_view_ultrahdr", |b| {
+        b.iter_batched(
+            || {
+                let mut decoder = ultrajpeg::Decoder::new().unwrap();
+                decoder
+                    .set_image_slice(
+                        corpus.ultrahdr.as_slice(),
+                        sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
+                        sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
+                        sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
+                    )
+                    .unwrap();
+                decoder
+            },
+            |mut decoder| {
+                black_box(
+                    decoder
+                        .decode_packed_view(
+                            sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
+                            sys::uhdr_color_transfer::UHDR_CT_PQ,
+                        )
+                        .unwrap(),
+                );
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
+fn build_large_corpus() -> BenchmarkCorpus {
+    let primary = sample_primary(LARGE_WIDTH, LARGE_HEIGHT);
+    let gain_map = sample_gain_map(LARGE_WIDTH, LARGE_HEIGHT);
+    let gain_map_metadata = sample_gain_map_metadata();
+
+    let plain = ultrajpeg::encode(&primary, &EncodeOptions::default()).expect("large plain encode");
+    let ultrahdr = ultrajpeg::encode(
+        &primary,
+        &EncodeOptions {
+            color_metadata: ultrajpeg::ColorMetadata {
+                gamut: Some(ColorGamut::DisplayP3),
+                transfer: Some(ColorTransfer::Pq),
+                ..ultrajpeg::ColorMetadata::default()
+            },
+            gain_map: Some(GainMapEncodeOptions {
+                image: gain_map,
+                metadata: gain_map_metadata,
+                quality: 80,
+                progressive: false,
+            }),
+            ..EncodeOptions::default()
+        },
+    )
+    .expect("large ultrahdr encode");
+
+    BenchmarkCorpus { plain, ultrahdr }
+}
+
+fn sample_primary(width: u32, height: u32) -> RawImage {
+    let mut data = Vec::with_capacity(width as usize * height as usize * 3);
+    for y in 0..height {
+        for x in 0..width {
+            data.push(((x * 255) / width.max(1)) as u8);
+            data.push(((y * 255) / height.max(1)) as u8);
+            data.push((((x ^ y) * 255) / width.max(height).max(1)) as u8);
+        }
+    }
+
     RawImage::from_data(
-        4,
-        4,
+        width,
+        height,
         PixelFormat::Rgb8,
         ColorGamut::DisplayP3,
         ColorTransfer::Srgb,
-        vec![
-            255, 0, 0, 255, 128, 0, 255, 255, 0, 255, 255, 255, //
-            0, 255, 0, 0, 128, 255, 0, 255, 255, 255, 0, 255, //
-            0, 0, 255, 32, 64, 255, 96, 160, 255, 200, 240, 255, //
-            16, 16, 16, 64, 64, 64, 160, 160, 160, 240, 240, 240, //
-        ],
+        data,
     )
     .expect("sample primary image")
 }
 
-fn sample_gain_map() -> RawImage {
+fn sample_gain_map(width: u32, height: u32) -> RawImage {
+    let mut data = Vec::with_capacity(width as usize * height as usize);
+    for y in 0..height {
+        for x in 0..width {
+            data.push((((x + y) * 255) / (width + height).max(1)) as u8);
+        }
+    }
+
     RawImage::from_data(
-        4,
-        4,
+        width,
+        height,
         PixelFormat::Gray8,
         ColorGamut::Bt709,
         ColorTransfer::Linear,
-        vec![
-            0, 32, 64, 96, //
-            32, 64, 96, 128, //
-            64, 96, 128, 160, //
-            96, 128, 160, 192, //
-        ],
+        data,
     )
     .expect("sample gain map image")
 }

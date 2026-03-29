@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- Added generated megapixel benchmark scenarios to `benches/typical.rs`, including realistic plain-JPEG decode, UltraHDR decode, gain-map skipping, and compatibility-wrapper packed HDR decode.
+- Added `CompressedImage::from_slice` for borrowed immutable JPEG input.
+- Added `Decoder::set_image_slice` for borrowed compat decode setup without a staging `Vec<u8>`.
+- Added owned-taking compat setters `Decoder::set_image_owned`, `Encoder::set_raw_image_owned`, and `Encoder::set_compressed_image_owned` so owned buffers can move into the stateful wrappers without an extra clone.
+
+### Changed
+
+- The crate version is now `0.3.0-rc1`.
+- `Decoder::decode_packed_view()` now uses a faster internal decode path that skips retaining primary and gain-map codestream copies that are irrelevant to packed HDR reconstruction.
+- UltraHDR primary-image decode and gain-map decode can now run in parallel internally for larger containers, using Rayon behind a size threshold and without changing the public API shape.
+- The benchmark suite now measures larger, more realistic decode paths instead of only tiny fixture-sized scenarios.
+
+### Migration
+
+- Existing code keeps working.
+- If you only need compatibility decode, prefer `Decoder::set_image_slice(bytes, ...)` over constructing a temporary owned buffer just to call `set_image`.
+- If you already have an owned `CompressedImage` or `RawImage`, prefer `set_image_owned`, `set_raw_image_owned`, or `set_compressed_image_owned` to avoid the clone performed by the legacy mut-borrow setter methods.
+- `cargo bench --bench typical` now includes heavier megapixel scenarios, so benchmark runs take longer than in `0.2.0`.
+
 ## 0.2.0
 
 ### Added

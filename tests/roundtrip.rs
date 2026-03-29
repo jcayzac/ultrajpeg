@@ -275,7 +275,7 @@ fn compat_owned_buffer_constructors_work() {
     .flat_map(u32::to_le_bytes)
     .collect::<Vec<_>>();
 
-    let mut hdr_raw = CompatRawImage::packed_owned(
+    let hdr_raw = CompatRawImage::packed_owned(
         sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
         4,
         4,
@@ -285,7 +285,7 @@ fn compat_owned_buffer_constructors_work() {
         sys::uhdr_color_range::UHDR_CR_FULL_RANGE,
     )
     .unwrap();
-    let mut base_compressed = CompressedImage::from_vec(
+    let base_compressed = CompressedImage::from_vec(
         base,
         sys::uhdr_color_gamut::UHDR_CG_BT_709,
         sys::uhdr_color_transfer::UHDR_CT_SRGB,
@@ -294,13 +294,52 @@ fn compat_owned_buffer_constructors_work() {
 
     let mut encoder = CompatEncoder::new().unwrap();
     encoder
-        .set_raw_image(&mut hdr_raw, ImgLabel::UHDR_HDR_IMG)
+        .set_raw_image_owned(hdr_raw, ImgLabel::UHDR_HDR_IMG)
         .unwrap();
     encoder
-        .set_compressed_image(&mut base_compressed, ImgLabel::UHDR_SDR_IMG)
+        .set_compressed_image_owned(base_compressed, ImgLabel::UHDR_SDR_IMG)
         .unwrap();
     encoder.encode().unwrap();
 
     let encoded = encoder.encoded_stream().unwrap().bytes().unwrap();
     assert!(!encoded.is_empty());
+}
+
+#[test]
+fn compat_decoder_accepts_borrowed_slice_api() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::default()
+    };
+    let encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+
+    let mut decoder = CompatDecoder::new().unwrap();
+    decoder
+        .set_image_slice(
+            encoded.as_slice(),
+            sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
+            sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
+            sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
+        )
+        .unwrap();
+
+    assert!(decoder.gainmap_metadata().unwrap().is_some());
+
+    let decoded = decoder
+        .decode_packed_view(
+            sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
+            sys::uhdr_color_transfer::UHDR_CT_PQ,
+        )
+        .unwrap();
+
+    assert_eq!(decoded.width, 4);
+    assert_eq!(decoded.height, 4);
+    assert_eq!(decoded.data.len(), 4 * 4 * 4);
 }

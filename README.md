@@ -39,6 +39,7 @@ The crate also exposes compatibility wrappers for a small `mozjpeg_rs`-style JPE
   - setting an SDR base JPEG
   - setting packed HDR input pixels
   - encoding an UltraHDR JPEG
+  - borrowing JPEG input slices without copying them
   - probing gain-map metadata
   - decoding a packed PQ HDR view
 
@@ -160,15 +161,13 @@ encoder.encode()?;
 
 let encoded = encoder.encoded_stream().unwrap().bytes()?.to_vec();
 
-let mut encoded_owned = encoded.clone();
-let mut compressed = CompressedImage::from_bytes(
-    encoded_owned.as_mut_slice(),
+let mut decoder = Decoder::new()?;
+decoder.set_image_slice(
+    encoded.as_slice(),
     sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
     sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
     sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
-);
-let mut decoder = Decoder::new()?;
-decoder.set_image(&mut compressed)?;
+)?;
 let packed = decoder.decode_packed_view(
     sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
     sys::uhdr_color_transfer::UHDR_CT_PQ,
@@ -187,7 +186,7 @@ The repository includes:
 - metadata-only integration tests for plain JPEG and UltraHDR marker parsing
 - encode/decode round-trip integration tests for the high-level API
 - compatibility tests for the wrapper APIs
-- representative Criterion benchmarks in `benches/typical.rs`
+- representative Criterion benchmarks in `benches/typical.rs`, including generated megapixel UltraHDR scenarios
 
 Fixture vectors currently cover:
 

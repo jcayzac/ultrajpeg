@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use crate::{
     codec::{decode_primary_image, encode_image},
     container::assemble_container,
+    decode_hdr_output,
     error::{Error, Result},
     inspect,
     metadata::build_ultra_hdr_metadata,
@@ -66,9 +67,10 @@ pub struct CompressedImage<'a> {
 }
 
 impl<'a> CompressedImage<'a> {
+    /// Borrow an immutable JPEG buffer without copying it.
     #[must_use]
-    pub fn from_bytes(
-        bytes: &'a mut [u8],
+    pub fn from_slice(
+        bytes: &'a [u8],
         color_gamut: ColorGamut,
         color_transfer: ColorTransfer,
         color_range: ColorRange,
@@ -79,6 +81,16 @@ impl<'a> CompressedImage<'a> {
             color_transfer,
             color_range,
         }
+    }
+
+    #[must_use]
+    pub fn from_bytes(
+        bytes: &'a mut [u8],
+        color_gamut: ColorGamut,
+        color_transfer: ColorTransfer,
+        color_range: ColorRange,
+    ) -> Self {
+        Self::from_slice(bytes, color_gamut, color_transfer, color_range)
     }
 
     /// Build an owned compressed image without borrowing the caller's buffer.
@@ -254,12 +266,21 @@ impl<'a> Encoder<'a> {
         image: &mut RawImage<'a>,
         label: ImgLabel,
     ) -> Result<&mut Self> {
+        self.set_raw_image_owned(image.clone(), label)
+    }
+
+    /// Move a packed HDR image into the encoder without cloning its buffer.
+    pub fn set_raw_image_owned(
+        &mut self,
+        image: RawImage<'a>,
+        label: ImgLabel,
+    ) -> Result<&mut Self> {
         if label != ImgLabel::UHDR_HDR_IMG {
             return Err(Error::InvalidInput(format!(
                 "unsupported raw image label {label:?}"
             )));
         }
-        self.hdr_raw = Some(image.clone());
+        self.hdr_raw = Some(image);
         Ok(self)
     }
 
@@ -268,12 +289,21 @@ impl<'a> Encoder<'a> {
         image: &mut CompressedImage<'a>,
         label: ImgLabel,
     ) -> Result<&mut Self> {
+        self.set_compressed_image_owned(image.clone(), label)
+    }
+
+    /// Move a compressed SDR image into the encoder without cloning its buffer.
+    pub fn set_compressed_image_owned(
+        &mut self,
+        image: CompressedImage<'a>,
+        label: ImgLabel,
+    ) -> Result<&mut Self> {
         if label != ImgLabel::UHDR_SDR_IMG {
             return Err(Error::InvalidInput(format!(
                 "unsupported compressed image label {label:?}"
             )));
         }
-        self.sdr_image = Some(image.clone());
+        self.sdr_image = Some(image);
         Ok(self)
     }
 
@@ -368,7 +398,29 @@ impl<'a> Decoder<'a> {
     }
 
     pub fn set_image(&mut self, image: &mut CompressedImage<'a>) -> Result<&mut Self> {
-        self.image = Some(image.clone());
+        self.set_image_owned(image.clone())
+    }
+
+    /// Move a compressed image into the decoder without cloning its buffer.
+    pub fn set_image_owned(&mut self, image: CompressedImage<'a>) -> Result<&mut Self> {
+        self.image = Some(image);
+        Ok(self)
+    }
+
+    /// Borrow an immutable JPEG buffer directly for compatibility decoding.
+    pub fn set_image_slice(
+        &mut self,
+        bytes: &'a [u8],
+        color_gamut: ColorGamut,
+        color_transfer: ColorTransfer,
+        color_range: ColorRange,
+    ) -> Result<&mut Self> {
+        self.image = Some(CompressedImage::from_slice(
+            bytes,
+            color_gamut,
+            color_transfer,
+            color_range,
+        ));
         Ok(self)
     }
 
@@ -398,15 +450,9 @@ impl<'a> Decoder<'a> {
             .image
             .as_ref()
             .ok_or_else(|| Error::InvalidInput("missing compressed image".into()))?;
-        let decoded = crate::decode(image.bytes.as_ref())?;
-        let display_boost = decoded
-            .ultra_hdr
-            .as_ref()
-            .and_then(|metadata| metadata.gain_map_metadata.as_ref())
-            .map_or(4.0, |metadata| metadata.hdr_capacity_max.max(1.0));
         let output = match transfer {
             sys::uhdr_color_transfer::UHDR_CT_PQ => {
-                decoded.reconstruct_hdr(display_boost, HdrOutputFormat::Pq1010102)?
+                decode_hdr_output(image.bytes.as_ref(), HdrOutputFormat::Pq1010102)?
             }
             _ => {
                 return Err(Error::UnsupportedFormat(
@@ -414,13 +460,13 @@ impl<'a> Decoder<'a> {
                 ));
             }
         };
+        let (output, color_metadata) = output;
 
         Ok(DecodedPacked {
             data: output.data,
             width: output.width,
             height: output.height,
-            color_gamut: decoded
-                .color_metadata
+            color_gamut: color_metadata
                 .gamut
                 .map(compat_gamut_from_core)
                 .unwrap_or(image.color_gamut),
