@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+toolchain="+1.94.0"
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+cargo $toolchain fmt --all
+cargo $toolchain clippy --fix --workspace --all-targets --all-features --allow-dirty --allow-staged -- -D warnings
+
+git diff --cached --name-only --diff-filter=ACMR -z | xargs -0 git add --

@@ -1,0 +1,26 @@
+[package]
+name = "ultrajpeg"
+version = "0.1.0-rc1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Pure Rust JPEG container and UltraHDR gain-map orchestration."
+repository = "https://github.com/jcayzac/ultrajpeg"
+homepage = "https://github.com/jcayzac/ultrajpeg"
+readme = "README.md"
+keywords = ["jpeg", "hdr", "ultrahdr", "gain-map", "image"]
+categories = ["multimedia::images", "encoding"]
+
+[workspace]
+members = [".", "xtask"]
+default-members = ["."]
+
+[dependencies]
+img-parts = "0.4"
+mozjpeg-rs = "0.9"
+thiserror = "2"
+ultrahdr-core = "0.2"
+zune-core = "0.5"
+zune-jpeg = "0.5"
+
+[dev-dependencies]
+img-parts = "0.4"

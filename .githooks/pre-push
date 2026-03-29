@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+cargo +1.94.0 nextest run --workspace --all-features
