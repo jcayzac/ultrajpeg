@@ -17,6 +17,7 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 - Parse UltraHDR XMP gain-map metadata
 - Parse ISO 21496-1 binary gain-map metadata
 - Reconstruct an HDR packed or linear view from a decoded gain map
+- Decode large UltraHDR primary and gain-map JPEG payloads in parallel internally
 
 ### Encode
 
@@ -66,6 +67,12 @@ The public high-level API lives in:
 - `ultrajpeg::decode_with_options`
 - `ultrajpeg::encode`
 - `ultrajpeg::UltraJpegEncoder`
+
+## Performance Notes
+
+- `ultrajpeg::inspect` parses container markers without decoding pixels.
+- The compatibility wrappers can borrow JPEG input directly with `CompressedImage::from_slice` and `Decoder::set_image_slice`.
+- Large UltraHDR decodes may use internal Rayon-based parallelism for primary-image and gain-map JPEG decode. This is internal only; there is no async API and no thread-management API exposed by the crate.
 
 ## Quick Start
 
