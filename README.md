@@ -1,14 +1,8 @@
 # ultrajpeg
 
-`ultrajpeg` is a Rust library for working with JPEG-based UltraHDR images.
+`ultrajpeg` is a Rust library for working with JPEG images.
 
-It combines three concerns that are often tangled together in application code:
-
-- JPEG image coding
-- JPEG container marker management
-- UltraHDR gain-map and metadata semantics
-
-The crate is designed as a public library crate, not as a thin binding to an AGPL or platform-specific implementation. It provides a native Rust API for encoding and decoding plain JPEG images, MPF-bundled gain-map JPEGs, ICC/EXIF payloads, UltraHDR XMP, and ISO 21496-1 metadata.
+It provides a native Rust API for encoding and decoding plain JPEG images, MPF-bundled gain-map JPEGs, ICC/EXIF payloads, UltraHDR XMP, and ISO 21496-1 metadata.
 
 ## Features
 
