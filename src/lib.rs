@@ -4,6 +4,7 @@ mod codec;
 mod compat;
 mod container;
 mod error;
+pub mod icc;
 mod metadata;
 mod types;
 

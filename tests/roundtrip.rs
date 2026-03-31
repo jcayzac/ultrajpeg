@@ -3,7 +3,7 @@ use ultrahdr_core::{
 };
 use ultrajpeg::{
     ColorMetadata, DecodeOptions, EncodeOptions, GainMapEncodeOptions, UltraJpegEncoder, decode,
-    decode_with_options,
+    decode_with_options, icc, inspect,
 };
 use ultrajpeg::{
     CompressedImage, Decoder as CompatDecoder, Encoder as CompatEncoder, ImgLabel,
@@ -151,6 +151,57 @@ fn decode_options_can_skip_gain_map_decoding() {
 
     assert!(decoded.gain_map.is_none());
     assert!(decoded.ultra_hdr.is_some());
+}
+
+#[test]
+fn display_p3_helpers_embed_the_built_in_profile() {
+    let color_metadata = ColorMetadata::display_p3();
+    assert_eq!(
+        color_metadata.icc_profile.as_deref(),
+        Some(icc::display_p3())
+    );
+    assert_eq!(color_metadata.gamut, Some(ColorGamut::DisplayP3));
+    assert_eq!(color_metadata.transfer, Some(ColorTransfer::Srgb));
+
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+
+    let encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+    let inspected = inspect(&encoded).unwrap();
+
+    assert_eq!(
+        inspected.color_metadata.icc_profile.as_deref(),
+        Some(icc::display_p3())
+    );
+    assert_eq!(inspected.color_metadata.gamut, Some(ColorGamut::DisplayP3));
+    assert_eq!(inspected.color_metadata.transfer, Some(ColorTransfer::Srgb));
+    assert!(inspected.gain_map_jpeg_len.is_some());
+}
+
+#[test]
+fn ultra_hdr_defaults_preserve_regular_jpeg_defaults() {
+    let options = EncodeOptions::ultra_hdr_defaults();
+
+    assert_eq!(options.quality, EncodeOptions::default().quality);
+    assert_eq!(options.progressive, EncodeOptions::default().progressive);
+    assert_eq!(
+        options.chroma_subsampling,
+        EncodeOptions::default().chroma_subsampling
+    );
+    assert_eq!(
+        options.color_metadata.icc_profile.as_deref(),
+        Some(icc::display_p3())
+    );
+    assert!(options.gain_map.is_none());
 }
 
 #[test]

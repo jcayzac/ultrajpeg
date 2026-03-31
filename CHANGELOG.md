@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- Added a built-in ICC registry Display-P3 profile helper at `ultrajpeg::icc::display_p3()`.
+- Added `ColorMetadata::display_p3()` and `EncodeOptions::ultra_hdr_defaults()` as explicit helpers for spec-friendly Ultra HDR primary-image metadata; both set the built-in Display-P3 ICC profile, `ColorGamut::DisplayP3`, and `ColorTransfer::Srgb` together.
+
+### Migration
+
+- If you want a Display-P3-tagged primary image for gain-map output, prefer `..EncodeOptions::ultra_hdr_defaults()` or `ColorMetadata::display_p3()` instead of sourcing and embedding the ICC payload manually in each caller. Those helpers already set the ICC profile, gamut, and transfer together, so you do not need to set the gamut separately.
+
 ## 0.3.0
 
 ### Added

@@ -23,6 +23,7 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 
 - Encode a primary JPEG image from `ultrahdr_core::RawImage`
 - Encode a gain-map JPEG image
+- Ship a built-in Display-P3 ICC profile helper and a spec-friendly Ultra HDR preset
 - Write ICC profiles and EXIF payloads
 - Write explicit color metadata
 - Write UltraHDR XMP metadata
@@ -62,6 +63,7 @@ The crate is split into layers:
 
 The public high-level API lives in:
 
+- `ultrajpeg::icc::display_p3`
 - `ultrajpeg::inspect`
 - `ultrajpeg::decode`
 - `ultrajpeg::decode_with_options`
@@ -90,13 +92,43 @@ let options = EncodeOptions {
         quality: 85,
         progressive: false,
     }),
-    ..EncodeOptions::default()
+    ..EncodeOptions::ultra_hdr_defaults()
 };
 
 let bytes = UltraJpegEncoder::new(options).encode(&primary)?;
 let decoded = ultrajpeg::decode(&bytes)?;
 assert_eq!(decoded.primary_image.width, 8);
 # Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## Built-In Display-P3 ICC
+
+When you want the crate to provide the primary-image ICC profile for a gain-map
+JPEG, use either the raw ICC helper or the higher-level preset.
+
+`ColorMetadata::display_p3()` and `EncodeOptions::ultra_hdr_defaults()` both
+set all three pieces together:
+
+- the embedded Display-P3 ICC profile
+- `ColorGamut::DisplayP3`
+- `ColorTransfer::Srgb`
+
+You do not need to set the gamut separately when using those helpers.
+
+```rust
+use ultrahdr_core::{ColorGamut, ColorTransfer};
+use ultrajpeg::{ColorMetadata, EncodeOptions, icc};
+
+let raw_profile = icc::display_p3();
+let color_metadata = ColorMetadata::display_p3();
+let options = EncodeOptions::ultra_hdr_defaults();
+
+assert_eq!(color_metadata.icc_profile.as_deref(), Some(raw_profile));
+assert_eq!(color_metadata.gamut, Some(ColorGamut::DisplayP3));
+assert_eq!(color_metadata.transfer, Some(ColorTransfer::Srgb));
+assert_eq!(options.color_metadata.icc_profile.as_deref(), Some(raw_profile));
+assert_eq!(options.color_metadata.gamut, Some(ColorGamut::DisplayP3));
+assert_eq!(options.color_metadata.transfer, Some(ColorTransfer::Srgb));
 ```
 
 ## Decode Example

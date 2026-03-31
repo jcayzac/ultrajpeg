@@ -17,9 +17,13 @@ pub enum ChromaSubsampling {
 /// JPEG color-related metadata handled by the crate.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ColorMetadata {
+    /// ICC profile bytes to embed in the primary JPEG.
     pub icc_profile: Option<Vec<u8>>,
+    /// EXIF payload to embed in the primary JPEG.
     pub exif: Option<Vec<u8>>,
+    /// Explicit primary-image gamut metadata tracked alongside the JPEG bytes.
     pub gamut: Option<ColorGamut>,
+    /// Explicit primary-image transfer metadata tracked alongside the JPEG bytes.
     pub transfer: Option<ColorTransfer>,
 }
 
@@ -76,19 +80,28 @@ impl Default for DecodeOptions {
 /// Gain-map specific encoding configuration.
 #[derive(Debug, Clone)]
 pub struct GainMapEncodeOptions {
+    /// Gain-map image pixels to encode as the secondary JPEG.
     pub image: RawImage,
+    /// Gain-map metadata to serialize as Ultra HDR XMP and ISO 21496-1 payloads.
     pub metadata: GainMapMetadata,
+    /// JPEG quality for the secondary gain-map codestream.
     pub quality: u8,
+    /// Whether to emit the secondary gain-map JPEG as progressive.
     pub progressive: bool,
 }
 
 /// Encode configuration for the primary image and optional bundled gain map.
 #[derive(Debug, Clone)]
 pub struct EncodeOptions {
+    /// JPEG quality for the primary image.
     pub quality: u8,
+    /// Whether to emit the primary JPEG as progressive.
     pub progressive: bool,
+    /// Chroma subsampling for the primary image.
     pub chroma_subsampling: ChromaSubsampling,
+    /// Color-related metadata to embed in the primary JPEG.
     pub color_metadata: ColorMetadata,
+    /// Optional gain-map image and metadata to bundle into an Ultra HDR container.
     pub gain_map: Option<GainMapEncodeOptions>,
 }
 
@@ -100,6 +113,64 @@ impl Default for EncodeOptions {
             chroma_subsampling: ChromaSubsampling::Yuv420,
             color_metadata: ColorMetadata::default(),
             gain_map: None,
+        }
+    }
+}
+
+impl ColorMetadata {
+    /// Build color metadata for a Display-P3 primary JPEG.
+    ///
+    /// The returned metadata:
+    ///
+    /// - embeds the crate's built-in Display-P3 ICC profile
+    /// - sets [`ColorMetadata::gamut`] to [`ColorGamut::DisplayP3`]
+    /// - sets [`ColorMetadata::transfer`] to [`ColorTransfer::Srgb`]
+    #[must_use]
+    pub fn display_p3() -> Self {
+        Self {
+            icc_profile: Some(crate::icc::display_p3().to_vec()),
+            exif: None,
+            gamut: Some(ColorGamut::DisplayP3),
+            transfer: Some(ColorTransfer::Srgb),
+        }
+    }
+}
+
+impl EncodeOptions {
+    /// Build default encoder options for an Ultra HDR primary image.
+    ///
+    /// This keeps the crate's regular JPEG defaults and preconfigures
+    /// [`EncodeOptions::color_metadata`] with [`ColorMetadata::display_p3()`].
+    ///
+    /// In other words, the returned options already include:
+    ///
+    /// - the built-in Display-P3 ICC profile
+    /// - [`ColorGamut::DisplayP3`] as the explicit primary-image gamut
+    /// - [`ColorTransfer::Srgb`] as the explicit primary-image transfer
+    ///
+    /// Use it as a struct update base when bundling a gain map:
+    ///
+    /// ```rust
+    /// # use ultrahdr_core::{GainMapMetadata, PixelFormat, RawImage};
+    /// # use ultrajpeg::{EncodeOptions, GainMapEncodeOptions};
+    /// let gain_map = RawImage::new(8, 8, PixelFormat::Gray8)?;
+    /// let options = EncodeOptions {
+    ///     gain_map: Some(GainMapEncodeOptions {
+    ///         image: gain_map,
+    ///         metadata: GainMapMetadata::new(),
+    ///         quality: 85,
+    ///         progressive: false,
+    ///     }),
+    ///     ..EncodeOptions::ultra_hdr_defaults()
+    /// };
+    /// # let _ = options;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn ultra_hdr_defaults() -> Self {
+        Self {
+            color_metadata: ColorMetadata::display_p3(),
+            ..Self::default()
         }
     }
 }
