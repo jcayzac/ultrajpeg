@@ -6,6 +6,7 @@
 
 - Added a built-in ICC registry Display-P3 profile helper at `ultrajpeg::icc::display_p3()`.
 - Added `ColorMetadata::display_p3()` and `EncodeOptions::ultra_hdr_defaults()` as explicit helpers for spec-friendly Ultra HDR primary-image metadata; both set the built-in Display-P3 ICC profile, `ColorGamut::DisplayP3`, and `ColorTransfer::Srgb` together.
+- Added structured gamut inspection helpers with `Chromaticity`, `GamutInfo`, `ColorMetadata::gamut_info()`, and `DecodedPacked::gamut_info()`.
 - Added a public gain-map computation seam with `GainMapChannels`, `ComputeGainMapOptions`, `ComputedGainMap`, and `compute_gain_map(...)`.
 - Added `ComputedGainMap::into_encode_options(...)` so computed gain maps compose directly with `EncodeOptions`.
 - Added `UltraHdrEncodeOptions` and the thin `encode_ultra_hdr(...)` convenience wrapper for callers that already chose their SDR primary image.
@@ -19,10 +20,12 @@
 - Ultra HDR decode is now more tolerant of malformed files that still contain usable gain-map semantics: Adobe Extended XMP on the primary JPEG is reassembled, and if the primary JPEG lacks effective gain-map metadata but MPF points to a secondary JPEG with valid `hdrgm:*` XMP or ISO 21496-1 gain-map metadata, the file is still decoded as Ultra HDR.
 - Gain-map decoding now supports both single-channel and multichannel gain-map JPEG payloads.
 - The compatibility encoder now reuses the same gain-map computation path exposed by the new public `compute_gain_map(...)` API.
+- `compat::Decoder::decode_packed_view()` now consults ICC-derived gamut semantics before falling back to the caller hint, so valid Ultra HDR JPEGs with usable primary-image ICC data no longer degrade to `UHDR_CG_UNSPECIFIED` unnecessarily.
 
 ### Migration
 
 - If you want a Display-P3-tagged primary image for gain-map output, prefer `..EncodeOptions::ultra_hdr_defaults()` or `ColorMetadata::display_p3()` instead of sourcing and embedding the ICC payload manually in each caller. Those helpers already set the ICC profile, gamut, and transfer together, so you do not need to set the gamut separately.
+- If you need structured gamut semantics from decoded metadata or compat packed decode, prefer `ColorMetadata::gamut_info()` or `DecodedPacked::gamut_info()` instead of relying only on the legacy enum returned by `DecodedPacked::meta()`. `meta()` still returns the best matching known gamut when one can be classified safely.
 - Compatibility-wrapper callers do not need to inject the built-in Display-P3 ICC manually when encoding from an HDR source tagged with `sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`, unless they want a different primary ICC than the preserved base JPEG ICC or the built-in default.
 - Policy-aware callers that previously had to route through the compatibility encoder just to compute a gain map can now use `compute_gain_map(...)` and then package through `encode(...)`.
 - If you want a single-call wrapper, use `encode_ultra_hdr(...)`, but keep in mind that `UltraHdrEncodeOptions::primary.gain_map` must remain `None` because the gain map is computed by the wrapper itself.

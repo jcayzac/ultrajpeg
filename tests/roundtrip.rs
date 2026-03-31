@@ -639,6 +639,13 @@ fn display_p3_helpers_embed_the_built_in_profile() {
         Some(icc::display_p3())
     );
     assert_eq!(color_metadata.gamut, Some(ColorGamut::DisplayP3));
+    assert_eq!(
+        color_metadata
+            .gamut_info()
+            .as_ref()
+            .and_then(|gamut| gamut.standard),
+        Some(ColorGamut::DisplayP3)
+    );
     assert_eq!(color_metadata.transfer, Some(ColorTransfer::Srgb));
 
     let options = EncodeOptions {

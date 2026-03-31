@@ -15,9 +15,10 @@ pub use compat::{
 };
 pub use error::{Error, Result};
 pub use types::{
-    ChromaSubsampling, ColorMetadata, ComputeGainMapOptions, ComputedGainMap, DecodeOptions,
-    DecodedGainMap, DecodedJpeg, EncodeOptions, GainMapChannels, GainMapEncodeOptions,
-    InspectedJpeg, UltraHdrEncodeOptions, UltraHdrMetadata, UltraJpegEncoder,
+    ChromaSubsampling, Chromaticity, ColorMetadata, ComputeGainMapOptions, ComputedGainMap,
+    DecodeOptions, DecodedGainMap, DecodedJpeg, EncodeOptions, GainMapChannels,
+    GainMapEncodeOptions, GamutInfo, InspectedJpeg, UltraHdrEncodeOptions, UltraHdrMetadata,
+    UltraJpegEncoder,
 };
 pub use ultrahdr_core::{GainMapMetadata, RawImage as CoreRawImage};
 

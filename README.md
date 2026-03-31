@@ -12,6 +12,7 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 - Decode a primary JPEG image into pixels
 - Extract ICC profiles and EXIF payloads
 - Extract explicit color metadata stored by `ultrajpeg`
+- Derive structured gamut information from explicit signaling or embedded ICC profiles
 - Detect MPF-bundled secondary JPEG payloads
 - Decode gain-map JPEG payloads
 - Parse UltraHDR XMP gain-map metadata
@@ -88,6 +89,37 @@ When both Ultra HDR XMP and ISO 21496-1 metadata are present, `ultrajpeg`
 prefers ISO 21496-1 for the effective parsed `gain_map_metadata`.
 
 The raw XMP and ISO payloads are still exposed separately on `UltraHdrMetadata`.
+
+## Gamut Semantics
+
+When a JPEG carries an ICC profile, `ultrajpeg` can derive structured gamut
+coordinates from that profile even if the file does not also carry an explicit
+crate-specific gamut marker.
+
+The current public helpers for that are:
+
+- `ColorMetadata::gamut_info()`
+- `DecodedPacked::gamut_info()`
+
+`DecodedPacked::meta()` still returns the legacy compat enum tuple, but it now
+uses ICC-derived gamut classification before falling back to the caller hint.
+For non-standard RGB spaces, use `gamut_info()` instead of relying only on the
+legacy enum.
+
+More precisely, compat packed decode resolves gamut in this order:
+
+1. explicit parsed primary-image gamut metadata
+2. ICC-derived gamut classification when the primary image's ICC can be
+   interpreted safely
+3. the caller-supplied compat hint
+
+`gamut_info()` is the richer API:
+
+- `None` means no trustworthy gamut data could be recovered
+- `Some(GamutInfo { standard: Some(...), .. })` means the gamut both exists and
+  matches a named standard such as Display-P3
+- `Some(GamutInfo { standard: None, .. })` means the gamut exists
+  structurally, but does not match one of the crate's named standards
 
 ## Metadata Placement
 

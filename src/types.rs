@@ -14,6 +14,42 @@ pub enum ChromaSubsampling {
     Yuv440,
 }
 
+/// An xy chromaticity coordinate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Chromaticity {
+    /// Horizontal chromaticity coordinate.
+    pub x: f32,
+    /// Vertical chromaticity coordinate.
+    pub y: f32,
+}
+
+/// Structured gamut information derived from explicit signaling or an ICC
+/// profile.
+///
+/// This type always carries explicit chromaticity coordinates when gamut data
+/// could be recovered.
+///
+/// [`GamutInfo::standard`] is only a convenience classification:
+///
+/// - `Some(...)` means the recovered primaries and white point match one of the
+///   crate's named RGB standards within tolerance
+/// - `None` means gamut coordinates were recovered successfully, but they do
+///   not match one of the crate's named RGB standards
+#[derive(Debug, Clone, PartialEq)]
+pub struct GamutInfo {
+    /// Matching named gamut standard, if the primaries and white point match
+    /// one of the crate's known RGB standards within tolerance.
+    pub standard: Option<ColorGamut>,
+    /// Red primary xy chromaticity.
+    pub red: Chromaticity,
+    /// Green primary xy chromaticity.
+    pub green: Chromaticity,
+    /// Blue primary xy chromaticity.
+    pub blue: Chromaticity,
+    /// White-point xy chromaticity.
+    pub white: Chromaticity,
+}
+
 /// JPEG color-related metadata handled by the crate.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ColorMetadata {
@@ -194,6 +230,33 @@ impl ColorMetadata {
             transfer: Some(ColorTransfer::Srgb),
         }
     }
+
+    /// Resolve structured gamut information from this metadata, if available.
+    ///
+    /// Resolution order is:
+    ///
+    /// - the explicit [`ColorMetadata::gamut`] field, if present
+    /// - otherwise the embedded ICC profile, if it contains usable RGB primaries
+    ///   and white-point data
+    ///
+    /// This method returns:
+    ///
+    /// - `None` when no trustworthy gamut information could be recovered
+    /// - `Some(GamutInfo { standard: Some(...), .. })` when the recovered gamut
+    ///   matches a named standard such as [`ColorGamut::DisplayP3`]
+    /// - `Some(GamutInfo { standard: None, .. })` when the recovered gamut is
+    ///   available structurally but does not match one of the named standards
+    ///
+    /// This is the preferred API when the caller needs more than the crate's
+    /// small [`ColorGamut`] enum can express.
+    #[must_use]
+    pub fn gamut_info(&self) -> Option<GamutInfo> {
+        self.gamut.map(GamutInfo::from_standard).or_else(|| {
+            self.icc_profile
+                .as_deref()
+                .and_then(crate::icc::gamut_info_from_profile)
+        })
+    }
 }
 
 impl EncodeOptions {
@@ -244,6 +307,49 @@ impl ComputedGainMap {
             metadata: self.metadata,
             quality,
             progressive,
+        }
+    }
+}
+
+impl GamutInfo {
+    #[must_use]
+    pub(crate) fn from_standard(standard: ColorGamut) -> Self {
+        let (red, green, blue, white) = match standard {
+            ColorGamut::Bt709 => (
+                Chromaticity { x: 0.64, y: 0.33 },
+                Chromaticity { x: 0.30, y: 0.60 },
+                Chromaticity { x: 0.15, y: 0.06 },
+                Chromaticity {
+                    x: 0.3127,
+                    y: 0.3290,
+                },
+            ),
+            ColorGamut::DisplayP3 => (
+                Chromaticity { x: 0.68, y: 0.32 },
+                Chromaticity { x: 0.265, y: 0.69 },
+                Chromaticity { x: 0.15, y: 0.06 },
+                Chromaticity {
+                    x: 0.3127,
+                    y: 0.3290,
+                },
+            ),
+            ColorGamut::Bt2100 => (
+                Chromaticity { x: 0.708, y: 0.292 },
+                Chromaticity { x: 0.170, y: 0.797 },
+                Chromaticity { x: 0.131, y: 0.046 },
+                Chromaticity {
+                    x: 0.3127,
+                    y: 0.3290,
+                },
+            ),
+        };
+
+        Self {
+            standard: Some(standard),
+            red,
+            green,
+            blue,
+            white,
         }
     }
 }

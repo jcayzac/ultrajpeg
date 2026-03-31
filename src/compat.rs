@@ -8,7 +8,7 @@ use crate::{
     error::{Error, Result},
     icc, inspect,
     metadata::build_ultra_hdr_metadata,
-    types::{ChromaSubsampling, ColorMetadata, ComputeGainMapOptions},
+    types::{ChromaSubsampling, ColorMetadata, ComputeGainMapOptions, GamutInfo},
 };
 use ultrahdr_core::{
     ColorGamut as CoreColorGamut, ColorTransfer as CoreColorTransfer, GainMapMetadata, PixelFormat,
@@ -228,6 +228,7 @@ pub struct DecodedPacked {
     color_gamut: ColorGamut,
     color_transfer: ColorTransfer,
     color_range: ColorRange,
+    gamut_info: Option<GamutInfo>,
 }
 
 impl DecodedPacked {
@@ -235,9 +236,43 @@ impl DecodedPacked {
         Ok(self.clone())
     }
 
+    /// Return the legacy compat metadata tuple for this decoded HDR view.
+    ///
+    /// This API is intentionally lossy:
+    ///
+    /// - the returned gamut is only the best matching known compat enum value
+    /// - non-standard-but-known structural gamut data is not representable here
+    ///
+    /// Gamut resolution order is:
+    ///
+    /// - explicit parsed primary-image gamut metadata
+    /// - otherwise ICC-derived gamut classification, when the primary image's
+    ///   ICC profile can be interpreted safely
+    /// - otherwise the caller-provided compat hint passed to
+    ///   [`Decoder::set_image`] or [`Decoder::set_image_slice`]
+    ///
+    /// If you need the richer structural gamut data, use
+    /// [`DecodedPacked::gamut_info`] instead.
     #[must_use]
     pub fn meta(&self) -> (ColorGamut, ColorTransfer, ColorRange) {
         (self.color_gamut, self.color_transfer, self.color_range)
+    }
+
+    /// Return structured gamut information resolved for this decoded HDR view.
+    ///
+    /// This may come from:
+    ///
+    /// - explicit parsed primary-image signaling, or
+    /// - the primary image's ICC profile when it can be interpreted safely.
+    ///
+    /// `None` means the crate could not recover trustworthy gamut coordinates.
+    ///
+    /// A returned [`GamutInfo`] may still have `standard = None`. That means the
+    /// crate recovered explicit chromaticity coordinates, but they do not match
+    /// one of the crate's named gamut standards within tolerance.
+    #[must_use]
+    pub fn gamut_info(&self) -> Option<&GamutInfo> {
+        self.gamut_info.as_ref()
     }
 }
 
@@ -468,17 +503,22 @@ impl<'a> Decoder<'a> {
             }
         };
         let (output, color_metadata) = output;
+        let gamut_info = color_metadata.gamut_info();
+        let color_gamut = gamut_info
+            .as_ref()
+            .and_then(|gamut_info| gamut_info.standard)
+            .map(compat_gamut_from_core)
+            .or_else(|| color_metadata.gamut.map(compat_gamut_from_core))
+            .unwrap_or(image.color_gamut);
 
         Ok(DecodedPacked {
             data: output.data,
             width: output.width,
             height: output.height,
-            color_gamut: color_metadata
-                .gamut
-                .map(compat_gamut_from_core)
-                .unwrap_or(image.color_gamut),
+            color_gamut,
             color_transfer: compat_transfer_from_core(output.transfer),
             color_range: sys::uhdr_color_range::UHDR_CR_FULL_RANGE,
+            gamut_info,
         })
     }
 }
