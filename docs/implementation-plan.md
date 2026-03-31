@@ -993,3 +993,512 @@ Expose the right seam.
 expose the gain-map computation and packaging seam cleanly enough that a
 policy-aware consumer no longer has to route through the compat encoder just to
 get the right mechanics.
+
+## API Ergonomics And Path To 1.0
+
+This section defines the public-API cleanup work needed before `ultrajpeg`
+should be considered stable.
+
+The current crate is functional, but the public surface still reflects its
+history as a wrapper around older mozjpeg / Ultra HDR entry points plus a newer
+native API.
+
+That history should not define the `1.0` public surface.
+
+The `1.0` goal is a public API that is:
+
+- self-consistent,
+- obvious to discover,
+- performant by default,
+- explicit about ownership and allocation,
+- non-regressive in consumer capability,
+- and aligned with Rust API Guidelines and Ed Page's public-Rust style
+  expectations.
+
+### Scope Preservation Requirement
+
+The public API may change substantially before `1.0`, but the crate must not
+lose any supported consumer capability that has been intentionally developed so
+far.
+
+API cleanup is allowed to change:
+
+- naming,
+- type structure,
+- module layout,
+- ownership expression,
+- and the preferred composition model.
+
+API cleanup must not degrade what consumers can accomplish with the crate.
+
+At a minimum, the stable API must still support all of the workflows that have
+been established during development, including:
+
+- plain JPEG encode and decode,
+- metadata-only inspection,
+- ICC / EXIF read and write,
+- effective color-semantics recovery from explicit signaling and ICC-backed
+  inputs,
+- Ultra HDR gain-map packaging,
+- Ultra HDR metadata generation and parsing,
+- gain-map computation from HDR and SDR inputs,
+- HDR reconstruction from decoded primary + gain map data,
+- spec-oriented compliant assembly helpers,
+- tolerant decoding of malformed-but-recoverable real-world Ultra HDR inputs,
+- and performance-sensitive use cases where borrowing and reduced allocation
+  matter.
+
+If a public API change removes a previously supported workflow, that change is
+incorrect unless the workflow is intentionally being dropped as a product
+decision and that decision is explicitly documented.
+
+### Design Standards
+
+The `1.0` API should follow these standards consistently.
+
+#### Rust API Guidelines alignment
+
+- Public names should be unsurprising and use standard Rust terminology.
+- Fallible operations should be explicit and return the crate `Result`.
+- Owned and borrowed behavior must be clear from signatures and docs.
+- Public modules should describe domains, not implementation history.
+- Defaults should be useful but never magical or hidden.
+- Public trait impls should be predictable and justified.
+- Error variants should reflect actionable failure classes.
+- Feature flags, if any are added later, should be capability-oriented and
+  documented.
+
+#### Ed Page style alignment
+
+- The API should tell a coherent story from the crate root.
+- Types should have narrow, clear responsibilities.
+- Configuration-heavy operations should prefer clear option structs or builders
+  over flag soup.
+- Borrowing and ownership should be intentional rather than incidental.
+- Avoid exposing backend details or migration artifacts as first-class concepts.
+- Prefer explicit module boundaries over a flat export dump.
+
+### Current Ergonomics Problems
+
+The current public surface has several issues that should be treated as
+intentional cleanup work rather than left as historical baggage.
+
+#### 1. Root exports mix native and compat APIs
+
+Today the crate root exports both:
+
+- the native `ultrajpeg` API,
+- and the compatibility API types and modules.
+
+That makes it unclear which surface is the primary one, and it causes naming
+pressure such as:
+
+- `UltraJpegEncoder` existing next to top-level `encode(...)`,
+- compat `Encoder` / `Decoder` occupying the obvious native names,
+- `CoreRawImage` being exported as a migration artifact rather than a
+  well-named image type.
+
+#### 2. Naming reflects implementation history more than product design
+
+Some public names are serviceable but not cohesive:
+
+- `UltraJpegEncoder` is more awkward than it should be,
+- `CoreRawImage` is not a user-facing concept,
+- `DecodedJpeg` and `InspectedJpeg` are clear enough individually, but they do
+  not yet live in a clearly curated module story,
+- `compat::mozjpeg` and `compat::jpeg` preserve old expectations but are not
+  the right center of gravity for the crate.
+
+#### 3. Borrowing and allocation behavior are not yet a public contract
+
+The crate has already improved in several hot paths, but the public API still
+has inconsistencies that matter for performance-sensitive users:
+
+- `decode(...)` returns owned codestream buffers,
+- some encode paths still clone configuration unnecessarily,
+- compat still performs owned conversions in places where the external API is
+  already borrowing-based,
+- and container assembly / parsing should continue to reduce avoidable buffer
+  cloning and reserialization.
+
+For `1.0`, allocation behavior in hot paths must be intentional and documented,
+not just "whatever the current implementation happens to do."
+
+#### 4. JPEG-only and Ultra HDR flows are not yet presented as one coherent API
+
+It is correct to keep Ultra HDR mechanics isolated internally, but externally
+the crate should still feel like one JPEG library with:
+
+- plain JPEG support,
+- structured metadata support,
+- and optional Ultra HDR support.
+
+That means "isolated internally" should not mean "disjoint public API."
+
+#### 5. Color semantics are modeled too weakly
+
+Recent real-world compat decode work showed that a small enum such as
+`Option<ColorGamut>` is not a sufficient primary model for the crate's color
+semantics.
+
+The crate needs to represent all three of these states distinctly:
+
+- no trustworthy gamut data could be recovered,
+- gamut data was recovered structurally but does not match a named standard,
+- gamut data was recovered structurally and matches a named standard.
+
+The stable API should therefore treat structured gamut information as a
+first-class concept, with named-gamut enums as a convenience classification
+layer rather than the only carrier of color semantics.
+
+### Target Public API Shape
+
+The target public shape for `1.0` is:
+
+#### Crate root
+
+The root should expose the primary entry points and the most important domain
+types:
+
+- `decode(...)`
+- `decode_with_options(...)`
+- `inspect(...)`
+- `encode(...)`
+- `compute_gain_map(...)`
+- `encode_ultra_hdr(...)`
+- native option / result types
+- a well-named public image type
+- `Error` and `Result`
+
+The crate root should present the stable API directly.
+
+The stable surface may reorganize how capabilities are expressed, but it must
+still cover the full set of supported consumer scenarios developed so far.
+
+#### Color semantics as a first-class stable concept
+
+The stable API should expose effective color semantics directly from the main
+decode and metadata surfaces.
+
+That means:
+
+- structured gamut information should be available from decode/inspect results,
+- ICC-backed color recovery is part of the crate's product behavior,
+- enum-only gamut fields should be treated as convenience views, not the
+  authoritative model.
+
+The stable API should distinguish:
+
+- no gamut data,
+- structural gamut data with no named-standard match,
+- structural gamut data with a named-standard match.
+
+#### Public module policy
+
+No public module should exist just because of implementation history.
+
+Public modules are acceptable only when they add clear domain value, for
+example:
+
+- `icc`
+  - bundled ICC profiles and ICC helpers
+- a narrowly-scoped HDR-oriented module if it materially improves discoverability
+
+If the API is clearer without extra public modules, the stable surface should be
+mostly root-based.
+
+Compatibility code may continue to exist internally while the crate evolves, but
+it is not part of the desired stable public API.
+
+### Naming And Type Cleanup Plan
+
+The public API should converge on a small vocabulary.
+
+#### Image type
+
+`CoreRawImage` should not survive to `1.0` as a public name.
+
+The options are:
+
+- re-export the underlying image type under a crate-owned ergonomic name such as
+  `Image`,
+- or introduce a crate-owned image type if stronger abstraction is later needed.
+
+The current planning assumption is:
+
+- prefer a well-named re-export first,
+- avoid introducing a wrapper type unless it solves a concrete API problem.
+
+#### Encoder naming
+
+If the crate keeps a stateful encoder type, its name should be the obvious one:
+
+- `Encoder`
+
+Similarly, if a stateful decoder type is later justified for the native API, it
+should use the obvious name only in the native namespace.
+
+#### Consistent operation verbs
+
+The verb set should be strict and documented:
+
+- `inspect`
+  - metadata/container-only, no pixel decode
+- `decode`
+  - pixel decode
+- `encode`
+  - one-shot encoding
+- `compute_gain_map`
+  - gain-map derivation only
+- `reconstruct_hdr`
+  - gain-map application / HDR reconstruction
+
+Public APIs should avoid overlapping verbs that differ only by hidden ownership
+or policy behavior.
+
+### Borrowing, Ownership, And Performance Policy
+
+For `1.0`, the crate should adopt an explicit ownership policy.
+
+#### General rules
+
+- Borrow input buffers whenever possible.
+- Do not clone caller-provided buffers unless the operation genuinely needs
+  ownership.
+- When ownership is required, make that obvious in the API or documentation.
+- Prefer one final output allocation over multiple intermediate cloned buffers.
+- Use `Cow` or borrowed view types where that materially improves ergonomics and
+  performance without making the API harder to use.
+- Do not collapse richer file-derived color semantics into a lossy enum unless
+  the API clearly documents that it is a convenience view.
+
+#### Decode-side goals
+
+- `inspect(...)` remains the metadata-only path and must stay allocation-light.
+- Pixel decode APIs should not force codestream cloning unless the caller asked
+  for retained codestream bytes.
+- Effective color semantics should come back from the same decode path as the
+  pixels and metadata, rather than requiring the caller to stitch together
+  multiple partially-overlapping APIs.
+- Before `1.0`, decide whether retained codestreams belong in:
+  - a separate decode mode,
+  - a separate result type,
+  - or `Cow`-style fields.
+
+The important point is not the exact mechanism; it is that the final design
+must make retained-byte ownership explicit.
+
+#### Color-metadata goals
+
+- Model gamut structurally first, not only as a named enum.
+- Treat named-gamut values as a best-effort classification over the structural
+  data.
+- Make ICC-backed gamut recovery part of the documented decode contract.
+- Ensure both inspect and decode expose the same effective primary-image color
+  semantics.
+- Keep encode-side convenience helpers for common named standards such as
+  Display-P3, but do not let those helpers define the entire color model.
+
+#### Encode-side goals
+
+- One-shot encode helpers should not clone `EncodeOptions` internally just to
+  feed stateful wrappers.
+- Container assembly should preserve borrowed primary JPEG data internally and
+  avoid repeated serialization/cloning before producing the final output buffer.
+- The gain-map packaging path should continue to avoid duplicate parsing passes
+  and buffer copies where a single structured parse is enough.
+
+#### Legacy-wrapper cleanup goals
+
+- Remove wrapper-era API shapes that only exist to mimic older libraries.
+- Keep any remaining internal bridging code allocation-light.
+- Any unavoidable ownership boundary caused by the underlying image/gain-map
+  math stack should be documented as such.
+
+### API Consolidation Strategy
+
+The crate should feel consolidated without collapsing important layering.
+
+#### JPEG-first, HDR-capable
+
+The user-facing story should be:
+
+- this is a JPEG library,
+- it handles JPEG metadata cleanly,
+- and it also supports Ultra HDR gain-map workflows.
+
+That means a plain-JPEG consumer should not feel like they are entering an HDR
+subsystem just to use the crate, while an Ultra HDR consumer should still find
+the HDR-specific pieces clearly grouped.
+
+#### Keep HDR policy explicit
+
+The crate should continue to isolate Ultra HDR policy-sensitive behavior:
+
+- gain-map computation,
+- metadata synthesis,
+- primary-image compliance helpers,
+- reconstruction helpers.
+
+But those APIs should compose naturally with the base JPEG encode/decode APIs
+instead of feeling bolted on.
+
+### Builder And Options Review
+
+Before `1.0`, all public configuration types should be audited.
+
+#### Review goals
+
+- Ensure defaults are good and unsurprising.
+- Avoid invalid combinations that are only rejected at runtime when a more
+  explicit API shape would be clearer.
+- Prefer helper constructors when they encode common compliant setups.
+- Keep convenience explicit rather than hidden behind silent behavior.
+- Keep structured color semantics authoritative, with enum-level shortcuts only
+  as convenience.
+
+#### Specific areas to review
+
+- whether `EncodeOptions` should remain a plain struct or gain a builder for
+  more discoverable fluent configuration,
+- whether Ultra HDR-oriented convenience constructors should be grouped more
+  clearly,
+- how `ColorMetadata` should expose:
+  - ICC payloads,
+  - structural gamut data,
+  - named-gamut convenience classification,
+- whether decode options should stay minimal or expand into a more explicit
+  "what do you want retained/decoded" contract,
+- whether retained-metadata and retained-codestream policy should be part of
+  options or type selection.
+
+The default bias should be:
+
+- keep plain structs when the number of fields is small and the struct update
+  syntax is ergonomic,
+- use builders only when they materially improve clarity.
+
+### Documentation And Discoverability Work
+
+The docs should become part of the stabilization work, not a final polish step.
+
+#### Required outcomes
+
+- The crate root docs should explain the native API first.
+- Every allocation-sensitive API should document ownership expectations.
+- The docs should explain the relationship between:
+  - plain JPEG support,
+  - metadata support,
+  - and Ultra HDR support.
+- The docs should explain the difference between:
+  - structural gamut data,
+  - named-gamut matches,
+  - and the absence of trustworthy gamut data.
+- Examples should use only the intended stable API.
+- The docs should make it clear that the stable API preserves the crate's
+  existing practical capabilities while presenting them more coherently.
+
+#### Rustdoc quality bar
+
+Before `1.0`, rustdoc should cover:
+
+- the main workflow entry points,
+- common option structs,
+- color/ICC helpers,
+- structured color-semantics access,
+- gain-map computation and packaging.
+
+### Migration Guide Requirement
+
+Once the new API shape exists, the crate must ship a migration guide for
+consumers using the pre-`1.0` API.
+
+This is not optional documentation polish. It is part of the stabilization
+work.
+
+#### Migration guide goals
+
+- Show how each major current workflow maps to the stable API.
+- Call out renamed, moved, merged, or removed types and functions.
+- Explain ownership-model changes, especially where borrowing replaces cloning
+  or where retained bytes become more explicit.
+- Explain the color-model upgrade from enum-only gamut access to structured
+  gamut semantics.
+- Explain any behavior changes in defaults or option struct layout.
+- Preserve developer experience by giving clear "old shape -> new shape"
+  recipes, not just a list of breaking changes.
+
+#### Minimum migration guide contents
+
+The guide should include concrete sections for:
+
+- plain JPEG encode/decode migration,
+- metadata inspection migration,
+- ICC/profile helper migration,
+- structured gamut / effective color-semantics migration,
+- gain-map computation migration,
+- Ultra HDR packaging migration,
+- HDR reconstruction migration,
+- and any legacy wrapper / historical API replacements that existed before the
+  final stable surface.
+
+The guide should include short before/after code examples for the major cases.
+
+### Stabilization Plan
+
+The goal is not to stabilize transitional names. The goal is to decide the
+final API and converge on it before `1.0`.
+
+#### Before `1.0`
+
+- Remove migration-artifact names such as `CoreRawImage`.
+- Remove wrapper-era public types and functions that do not belong in the final
+  API.
+- Ensure examples and docs use only the intended stable API.
+- Add changelog migration notes for any remaining breaking renames or removals
+  while `0.x` still allows that cleanup.
+- Write and ship the dedicated migration guide once the stable API shape is
+  implemented.
+
+### Recommended Implementation Order
+
+1. Audit the current public API and write down the target module/export matrix.
+2. Introduce the final naming for core image / encoder concepts.
+3. Remove wrapper-era public API surface that does not belong in the stable
+   design.
+4. Remove avoidable option and buffer cloning in public hot paths.
+5. Make retained-byte ownership explicit on decode.
+6. Finalize the stable color-semantics model so structured gamut data is
+   first-class and enum-only gamut access is clearly a convenience view.
+7. Audit docs and examples so they use only the intended `1.0` story.
+8. Write the migration guide against the implemented near-final API.
+9. Document the final breaking changes and migration steps while still in `0.x`.
+10. Cut at least one `0.x` release with the intended near-final surface before
+   `1.0`.
+
+### 1.0 Acceptance Criteria
+
+`ultrajpeg` is ready for `1.0` only when all of the following are true:
+
+1. The crate root clearly presents the intended stable API rather than a mixed
+   historical surface.
+2. Public names no longer reflect backend history or migration artifacts.
+3. Wrapper-era API surface that does not fit the final design has been removed.
+4. The ownership and allocation behavior of hot-path APIs is explicit and
+   documented.
+5. Avoidable clones in decode, legacy bridging code, and container assembly have
+   been removed.
+6. Structured color semantics are part of the stable public model, and enum-only
+   gamut access is clearly documented as a convenience layer where it exists.
+7. The plain-JPEG and Ultra HDR APIs feel like one coherent library rather than
+   two overlapping products.
+8. Rustdoc examples, README examples, and tests all use the intended stable API
+   story.
+9. The stable API preserves the crate's supported consumer workflows rather than
+   narrowing them.
+10. A migration guide exists for consumers of the pre-`1.0` API and covers the
+   major workflow mappings with code examples.
+11. The intended stable surface has shipped in at least one `0.x` release before
+   `1.0`.
+12. The public API has been reviewed against Rust API Guidelines and Ed Page's
+   style expectations, and any deliberate deviations are documented.
