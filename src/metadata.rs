@@ -1,6 +1,6 @@
 use crate::{
     error::{Error, Result},
-    types::{ColorMetadata, UltraHdrMetadata},
+    types::{ColorMetadata, GainMapMetadataSource, MetadataLocation, UltraHdrMetadata},
 };
 use ultrahdr_core::{
     ColorGamut, ColorTransfer, GainMapMetadata,
@@ -33,13 +33,21 @@ pub(crate) fn build_ultra_hdr_metadata(
 
 pub(crate) fn parse_ultra_hdr_metadata(
     xmp: Option<&str>,
+    xmp_location: Option<MetadataLocation>,
     iso: Option<&[u8]>,
+    iso_location: Option<MetadataLocation>,
 ) -> Result<Option<UltraHdrMetadata>> {
     let gain_map_from_xmp = xmp
         .filter(|xmp_data| xmp_passes_defensive_checks(xmp_data))
         .and_then(|xmp_data| parse_xmp(xmp_data).ok().map(|pair| pair.0));
     let gain_map_from_iso = iso.and_then(|iso_data| deserialize_iso21496(iso_data).ok());
-    let gain_map_metadata = gain_map_from_iso.or(gain_map_from_xmp);
+    let (gain_map_metadata, gain_map_metadata_source) = if let Some(metadata) = gain_map_from_iso {
+        (Some(metadata), Some(GainMapMetadataSource::Iso21496_1))
+    } else if let Some(metadata) = gain_map_from_xmp {
+        (Some(metadata), Some(GainMapMetadataSource::Xmp))
+    } else {
+        (None, None)
+    };
 
     if xmp.is_none() && iso.is_none() && gain_map_metadata.is_none() {
         return Ok(None);
@@ -47,8 +55,11 @@ pub(crate) fn parse_ultra_hdr_metadata(
 
     Ok(Some(UltraHdrMetadata {
         xmp: xmp.map(ToOwned::to_owned),
+        xmp_location,
         iso_21496_1: iso.map(ToOwned::to_owned),
+        iso_21496_1_location: iso_location,
         gain_map_metadata,
+        gain_map_metadata_source,
     }))
 }
 
@@ -91,11 +102,17 @@ pub(crate) fn iso_segment_payload(iso_21496_1: &[u8]) -> Vec<u8> {
 }
 
 pub(crate) fn encode_color_metadata(color_metadata: &ColorMetadata) -> Option<Vec<u8>> {
-    if color_metadata.gamut.is_none() && color_metadata.transfer.is_none() {
+    let gamut = color_metadata.gamut.or_else(|| {
+        color_metadata
+            .gamut_info
+            .as_ref()
+            .and_then(|info| info.standard)
+    });
+    if gamut.is_none() && color_metadata.transfer.is_none() {
         return None;
     }
 
-    let gamut = encode_gamut(color_metadata.gamut.unwrap_or(ColorGamut::Bt709));
+    let gamut = encode_gamut(gamut.unwrap_or(ColorGamut::Bt709));
     let transfer = encode_transfer(color_metadata.transfer.unwrap_or(ColorTransfer::Srgb));
 
     Some([COLOR_MARKER_PREFIX, &[1, gamut, transfer]].concat())

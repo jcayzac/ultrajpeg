@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.5.0
+
+Detailed migration guide:
+
+- [Migration guide from `0.4.0-rc6` to `0.5.0-rc1`](docs/user/migration-0.5.md)
+
+### Added
+
+- Added exhaustive rustdoc coverage across the public native API and enabled
+  `#![deny(missing_docs)]` for the crate.
+- Added expanded crate-level documentation covering major encode, decode,
+  inspect, gain-map, color-metadata, provenance, ownership, and limitation
+  scenarios for docs.rs consumers.
+- Added `docs/maintainer/api-guide.md` as the maintainer-facing summary of the
+  implemented stable API shape and its maintenance rules.
+- Added `docs/user/migration-0.5.md` with a detailed migration path from
+  `0.4.0-rc6`.
+
+### Changed
+
+- Bumped the crate version to `0.5.0-rc1`.
+- Removed the wrapper-era compatibility API from the public crate surface.
+- Simplified the root API around one native surface with `Image`, `encode`,
+  `Encoder`, `decode`, `DecodedImage`, `inspect`, and `Inspection`.
+- Renamed `DecodedJpeg` to `DecodedImage`, `InspectedJpeg` to `Inspection`,
+  `GainMapEncodeOptions` to `GainMapBundle`, `UltraJpegEncoder` to `Encoder`,
+  and `CoreRawImage` to `Image`.
+- Split EXIF out of `ColorMetadata` into the new `PrimaryMetadata` type and
+  renamed `EncodeOptions::color_metadata` to
+  `EncodeOptions::primary_metadata`.
+- Promoted metadata provenance into the public API with
+  `MetadataLocation` and `GainMapMetadataSource`.
+- `decode(...)` no longer retains primary or gain-map JPEG codestream bytes by
+  default; retained codestreams are now explicit through `DecodeOptions`.
+- `ComputedGainMap::into_encode_options(...)` was replaced by
+  `ComputedGainMap::into_bundle(...)`.
+
+### Migration
+
+- Expect source changes if you were using `0.4.0-rc6`; this is an intentional
+  API-shaping release before `1.0`.
+- Port native callers to `Image`, `PrimaryMetadata`, `DecodedImage`,
+  `Inspection`, `GainMapBundle`, and `Encoder`.
+- If you relied on default retained codestream bytes from `decode(...)`, switch
+  to `decode_with_options(...)` and enable the relevant retention flags
+  explicitly.
+- If you relied on the old compatibility API, either stay on `0.4.0-rc6` for
+  now or port to the native root API; the compatibility surface is no longer
+  public in `0.5.0-rc1`.
+
 ## 0.4.0
 
 ### Added

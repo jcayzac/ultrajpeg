@@ -1,8 +1,8 @@
 use crate::{
     Result,
     types::{
-        ComputeGainMapOptions, ComputedGainMap, EncodeOptions, GainMapChannels,
-        GainMapEncodeOptions, UltraHdrEncodeOptions,
+        ComputeGainMapOptions, ComputedGainMap, EncodeOptions, GainMapBundle, GainMapChannels,
+        UltraHdrEncodeOptions,
     },
 };
 use ultrahdr_core::{
@@ -43,7 +43,7 @@ pub(crate) fn ultra_hdr_encode_options(
     options: &UltraHdrEncodeOptions,
 ) -> EncodeOptions {
     EncodeOptions {
-        gain_map: Some(GainMapEncodeOptions {
+        gain_map: Some(GainMapBundle {
             image: computed.image,
             metadata: computed.metadata,
             quality: options.gain_map_quality,

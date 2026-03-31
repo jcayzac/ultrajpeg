@@ -1,5 +1,17 @@
 # Ultrajpeg Implementation Plan
 
+## Status
+
+The stable native API refactor described in this plan was implemented in
+`0.5.0-rc1`.
+
+This document is retained as historical planning context. For current
+maintainer-facing guidance, see:
+
+- `docs/maintainer/api-guide.md`
+- `docs/maintainer/stable-api-contract.md`
+- `docs/user/migration-0.5.md`
+
 ## Goal
 
 Build a public Rust crate named `ultrajpeg` that can encode and decode JPEG-based HDR images with gain maps, color signaling, ICC profiles, and UltraHDR-related metadata, without depending on AGPL-licensed components.

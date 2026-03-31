@@ -6,8 +6,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let decoded = decode(&bytes)?;
     println!(
         "{}x{}, gain_map={}",
-        decoded.primary_image.width,
-        decoded.primary_image.height,
+        decoded.image.width,
+        decoded.image.height,
         decoded.gain_map.is_some()
     );
     Ok(())

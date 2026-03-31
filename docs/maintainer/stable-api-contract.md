@@ -1,5 +1,17 @@
 # Stable API Contract Draft
 
+## Status
+
+This draft was implemented in `0.5.0-rc1`.
+
+It remains useful as design history and for explaining why the public surface
+looks the way it does, but it is no longer just a proposal.
+
+For current maintainer-facing guidance and migration material, see:
+
+- `docs/maintainer/api-guide.md`
+- `docs/user/migration-0.5.md`
+
 This document defines the proposed stable public API for `ultrajpeg`.
 
 It is a review artifact, not an implementation file. The goal is to make the
