@@ -172,18 +172,13 @@ fn build_large_corpus() -> BenchmarkCorpus {
     let ultrahdr = ultrajpeg::encode(
         &primary,
         &EncodeOptions {
-            color_metadata: ultrajpeg::ColorMetadata {
-                gamut: Some(ColorGamut::DisplayP3),
-                transfer: Some(ColorTransfer::Pq),
-                ..ultrajpeg::ColorMetadata::default()
-            },
             gain_map: Some(GainMapEncodeOptions {
                 image: gain_map,
                 metadata: gain_map_metadata,
                 quality: 80,
                 progressive: false,
             }),
-            ..EncodeOptions::default()
+            ..EncodeOptions::ultra_hdr_defaults()
         },
     )
     .expect("large ultrahdr encode");
