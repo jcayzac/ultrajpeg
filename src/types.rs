@@ -30,8 +30,14 @@ pub struct ColorMetadata {
 /// Structured UltraHDR metadata extracted from the container.
 #[derive(Debug, Clone, Default)]
 pub struct UltraHdrMetadata {
+    /// Effective XMP payload used for Ultra HDR metadata parsing.
+    ///
+    /// For spec-shaped files this may come from the gain-map JPEG rather than
+    /// from the primary JPEG's container XMP.
     pub xmp: Option<String>,
+    /// Effective ISO 21496-1 payload used for Ultra HDR metadata parsing.
     pub iso_21496_1: Option<Vec<u8>>,
+    /// Parsed gain-map metadata after the crate's source-selection rules.
     pub gain_map_metadata: Option<GainMapMetadata>,
 }
 
@@ -82,7 +88,8 @@ impl Default for DecodeOptions {
 pub struct GainMapEncodeOptions {
     /// Gain-map image pixels to encode as the secondary JPEG.
     pub image: RawImage,
-    /// Gain-map metadata to serialize as Ultra HDR XMP and ISO 21496-1 payloads.
+    /// Gain-map metadata to serialize into the secondary gain-map JPEG's
+    /// `hdrgm:*` XMP and ISO 21496-1 payloads.
     pub metadata: GainMapMetadata,
     /// JPEG quality for the secondary gain-map codestream.
     pub quality: u8,
@@ -114,7 +121,8 @@ pub struct ComputeGainMapOptions {
 pub struct ComputedGainMap {
     /// Gain-map image pixels ready to be JPEG-encoded and bundled.
     pub image: RawImage,
-    /// Gain-map metadata ready to be serialized as Ultra HDR XMP and ISO 21496-1.
+    /// Gain-map metadata ready to be serialized into the secondary gain-map
+    /// JPEG's `hdrgm:*` XMP and ISO 21496-1 payloads.
     pub metadata: GainMapMetadata,
 }
 

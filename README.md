@@ -28,8 +28,9 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 - Ship a built-in Display-P3 ICC profile helper and a spec-friendly Ultra HDR preset
 - Write ICC profiles and EXIF payloads
 - Write explicit color metadata
-- Write UltraHDR XMP metadata
-- Write ISO 21496-1 metadata
+- Write primary-JPEG Ultra HDR container XMP
+- Write gain-map-JPEG `hdrgm:*` XMP metadata
+- Write gain-map-JPEG ISO 21496-1 metadata
 - Assemble an MPF JPEG that bundles the primary image and gain map
 
 ### Compatibility Wrappers
@@ -87,6 +88,26 @@ When both Ultra HDR XMP and ISO 21496-1 metadata are present, `ultrajpeg`
 prefers ISO 21496-1 for the effective parsed `gain_map_metadata`.
 
 The raw XMP and ISO payloads are still exposed separately on `UltraHdrMetadata`.
+
+## Metadata Placement
+
+When `ultrajpeg` encodes an Ultra HDR JPEG, it writes metadata in the same
+split layout used by the Ultra HDR spec:
+
+- the primary JPEG carries MPF and the container/directory XMP entries
+- the gain-map JPEG carries the `hdrgm:*` XMP payload
+- the gain-map JPEG carries the ISO 21496-1 payload
+
+On decode, `ultrajpeg` is tolerant of malformed files that do not follow the
+ideal primary-XMP layout exactly:
+
+- Adobe Extended XMP on the primary JPEG is reassembled before parsing
+- if the primary JPEG has no effective gain-map metadata but MPF points to a
+  second JPEG whose metadata contains valid `hdrgm:*` XMP or ISO 21496-1
+  gain-map metadata, `ultrajpeg` still treats the image as Ultra HDR
+
+MPF alone is not enough to infer Ultra HDR semantics; the embedded secondary
+JPEG still needs valid gain-map metadata.
 
 `ultrajpeg` also applies a small defensive filter before accepting XMP fallback:
 

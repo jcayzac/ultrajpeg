@@ -1,5 +1,10 @@
+use img_parts::{
+    Bytes,
+    jpeg::{Jpeg, markers},
+};
 use ultrahdr_core::{
     ColorGamut, ColorTransfer, GainMapMetadata, PixelFormat, RawImage, gainmap::HdrOutputFormat,
+    metadata::find_jpeg_boundaries,
 };
 use ultrajpeg::{
     ColorMetadata, ComputeGainMapOptions, DecodeOptions, EncodeOptions, GainMapChannels,
@@ -10,6 +15,9 @@ use ultrajpeg::{
     CompressedImage, Decoder as CompatDecoder, Encoder as CompatEncoder, ImgLabel,
     RawImage as CompatRawImage, jpeg, sys,
 };
+
+const XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+const ISO_NAMESPACE: &[u8] = b"urn:iso:std:iso:ts:21496:-1\0";
 
 fn sample_primary() -> RawImage {
     let data = vec![
@@ -130,6 +138,31 @@ fn sample_hdr() -> RawImage {
     .expect("sample hdr image")
 }
 
+fn split_embedded_jpegs(bytes: &[u8]) -> Vec<&[u8]> {
+    find_jpeg_boundaries(bytes)
+        .into_iter()
+        .map(|(start, end)| &bytes[start..end])
+        .collect()
+}
+
+fn xmp_payload(bytes: &[u8]) -> Option<String> {
+    let jpeg = Jpeg::from_bytes(Bytes::copy_from_slice(bytes)).unwrap();
+    jpeg.segments().iter().find_map(|segment| {
+        let contents = segment.contents();
+        (segment.marker() == markers::APP1 && contents.starts_with(XMP_NAMESPACE))
+            .then(|| String::from_utf8(contents[XMP_NAMESPACE.len()..].to_vec()).unwrap())
+    })
+}
+
+fn iso_payload(bytes: &[u8]) -> Option<Vec<u8>> {
+    let jpeg = Jpeg::from_bytes(Bytes::copy_from_slice(bytes)).unwrap();
+    jpeg.segments().iter().find_map(|segment| {
+        let contents = segment.contents();
+        (segment.marker() == markers::APP2 && contents.starts_with(ISO_NAMESPACE))
+            .then(|| contents[ISO_NAMESPACE.len()..].to_vec())
+    })
+}
+
 #[test]
 fn encodes_and_decodes_ultrahdr_roundtrip() {
     let options = EncodeOptions {
@@ -184,6 +217,38 @@ fn encodes_and_decodes_ultrahdr_roundtrip() {
         .unwrap();
     assert_eq!(hdr.width, 4);
     assert_eq!(hdr.height, 4);
+}
+
+#[test]
+fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+
+    let encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+    let codestreams = split_embedded_jpegs(&encoded);
+
+    assert_eq!(codestreams.len(), 2);
+
+    let primary_xmp = xmp_payload(codestreams[0]).expect("primary xmp");
+    assert!(primary_xmp.contains("Item:Semantic=\"Primary\""));
+    assert!(primary_xmp.contains("Item:Semantic=\"GainMap\""));
+    assert!(!primary_xmp.contains("hdrgm:GainMapMax"));
+    assert!(iso_payload(codestreams[0]).is_none());
+
+    let gain_map_xmp = xmp_payload(codestreams[1]).expect("gain map xmp");
+    assert!(gain_map_xmp.contains("hdrgm:GainMapMax"));
+    assert!(gain_map_xmp.contains("hdrgm:HDRCapacityMax"));
+    assert!(!gain_map_xmp.contains("Item:Semantic=\"GainMap\""));
+    assert!(iso_payload(codestreams[1]).is_some());
 }
 
 #[test]
@@ -376,7 +441,7 @@ fn decode_uses_iso_metadata_when_xmp_is_absent() {
         .encode(&sample_primary())
         .unwrap();
 
-    replace_once(
+    replace_all(
         &mut encoded,
         b"http://ns.adobe.com/xap/1.0/\0",
         b"http://ns.adobe.com/xaq/1.0/\0",
@@ -890,4 +955,23 @@ fn replace_once(bytes: &mut [u8], needle: &[u8], replacement: &[u8]) {
         .position(|window| window == needle)
         .expect("needle not found");
     bytes[offset..offset + needle.len()].copy_from_slice(replacement);
+}
+
+fn replace_all(bytes: &mut [u8], needle: &[u8], replacement: &[u8]) {
+    assert_eq!(
+        needle.len(),
+        replacement.len(),
+        "replacement must preserve byte length"
+    );
+
+    let mut replaced = 0;
+    for offset in (0..=bytes.len().saturating_sub(needle.len()))
+        .filter(|&offset| &bytes[offset..offset + needle.len()] == needle)
+        .collect::<Vec<_>>()
+    {
+        bytes[offset..offset + needle.len()].copy_from_slice(replacement);
+        replaced += 1;
+    }
+
+    assert!(replaced > 0, "needle not found");
 }

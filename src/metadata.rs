@@ -5,8 +5,8 @@ use crate::{
 use ultrahdr_core::{
     ColorGamut, ColorTransfer, GainMapMetadata,
     metadata::{
-        create_iso_app2_marker, create_xmp_app1_marker, deserialize_iso21496, generate_xmp,
-        parse_xmp, serialize_iso21496,
+        CONTAINER_NAMESPACE, HDRGM_NAMESPACE, ITEM_NAMESPACE, create_iso_app2_marker,
+        create_xmp_app1_marker, deserialize_iso21496, parse_xmp, serialize_iso21496,
     },
 };
 
@@ -14,14 +14,20 @@ pub(crate) const XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 pub(crate) const ISO_NAMESPACE: &[u8] = b"urn:iso:std:iso:ts:21496:-1\0";
 pub(crate) const COLOR_MARKER_PREFIX: &[u8] = b"urn:ultrajpeg:color:1\0";
 
+pub(crate) struct EncodedUltraHdrMetadata {
+    pub(crate) primary_xmp: String,
+    pub(crate) gain_map_xmp: String,
+    pub(crate) gain_map_iso_21496_1: Vec<u8>,
+}
+
 pub(crate) fn build_ultra_hdr_metadata(
     metadata: &GainMapMetadata,
     gain_map_length: usize,
-) -> UltraHdrMetadata {
-    UltraHdrMetadata {
-        xmp: Some(generate_xmp(metadata, gain_map_length)),
-        iso_21496_1: Some(serialize_iso21496(metadata)),
-        gain_map_metadata: Some(metadata.clone()),
+) -> EncodedUltraHdrMetadata {
+    EncodedUltraHdrMetadata {
+        primary_xmp: generate_container_xmp(gain_map_length),
+        gain_map_xmp: generate_gain_map_xmp(metadata),
+        gain_map_iso_21496_1: serialize_iso21496(metadata),
     }
 }
 
@@ -153,4 +159,86 @@ fn decode_transfer(value: u8) -> Result<ColorTransfer> {
         3 => Ok(ColorTransfer::Hlg),
         _ => Err(Error::Metadata(format!("unknown transfer value {value}"))),
     }
+}
+
+fn generate_container_xmp(gain_map_length: usize) -> String {
+    format!(
+        r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+        xmlns:Container="{CONTAINER_NAMESPACE}"
+        xmlns:Item="{ITEM_NAMESPACE}">
+      <Container:Directory>
+        <rdf:Seq>
+          <rdf:li rdf:parseType="Resource">
+            <Container:Item
+                Item:Semantic="Primary"
+                Item:Mime="image/jpeg"/>
+          </rdf:li>
+          <rdf:li rdf:parseType="Resource">
+            <Container:Item
+                Item:Semantic="GainMap"
+                Item:Mime="image/jpeg"
+                Item:Length="{gain_map_length}"/>
+          </rdf:li>
+        </rdf:Seq>
+      </Container:Directory>
+    </rdf:Description>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>"#
+    )
+}
+
+fn generate_gain_map_xmp(metadata: &GainMapMetadata) -> String {
+    let is_single_channel = metadata.is_single_channel();
+    let gain_map_min = format_xmp_values(&metadata.min_content_boost, is_single_channel, true);
+    let gain_map_max = format_xmp_values(&metadata.max_content_boost, is_single_channel, true);
+    let gamma = format_xmp_values(&metadata.gamma, is_single_channel, false);
+    let offset_sdr = format_xmp_values(&metadata.offset_sdr, is_single_channel, false);
+    let offset_hdr = format_xmp_values(&metadata.offset_hdr, is_single_channel, false);
+    let hdr_capacity_min = metadata.hdr_capacity_min.log2();
+    let hdr_capacity_max = metadata.hdr_capacity_max.log2();
+
+    format!(
+        r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+        xmlns:hdrgm="{HDRGM_NAMESPACE}"
+        hdrgm:Version="1.0"
+        hdrgm:GainMapMin="{gain_map_min}"
+        hdrgm:GainMapMax="{gain_map_max}"
+        hdrgm:Gamma="{gamma}"
+        hdrgm:OffsetSDR="{offset_sdr}"
+        hdrgm:OffsetHDR="{offset_hdr}"
+        hdrgm:HDRCapacityMin="{hdr_capacity_min:.6}"
+        hdrgm:HDRCapacityMax="{hdr_capacity_max:.6}"
+        hdrgm:BaseRenditionIsHDR="False"/>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>"#
+    )
+}
+
+fn format_xmp_values(values: &[f32; 3], single_channel: bool, use_log2: bool) -> String {
+    if single_channel {
+        let value = if use_log2 {
+            values[0].log2()
+        } else {
+            values[0]
+        };
+        return format!("{value:.6}");
+    }
+
+    let converted = if use_log2 {
+        values.map(f32::log2)
+    } else {
+        *values
+    };
+    format!(
+        "{:.6}, {:.6}, {:.6}",
+        converted[0], converted[1], converted[2]
+    )
 }

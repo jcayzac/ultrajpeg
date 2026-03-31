@@ -15,6 +15,8 @@
 - The UltraHDR compatibility encoder now preserves an existing primary JPEG ICC profile, and if the base JPEG has no ICC while the HDR input gamut is `sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`, it injects the crate's built-in Display-P3 ICC profile automatically. Other HDR input gamuts do not trigger ICC auto-injection.
 - Ultra HDR metadata parsing now prefers ISO 21496-1 over XMP when both metadata forms are present.
 - Ultra HDR XMP fallback now has lightweight defensive rejection in `ultrajpeg`: XMP with `hdrgm:BaseRenditionIsHDR="True"` is ignored, and XMP fallback is ignored when key required fields are missing.
+- Ultra HDR encode now follows the spec-shaped metadata split more closely: the primary JPEG carries MPF plus the container/directory XMP, while the gain-map JPEG carries the `hdrgm:*` XMP payload and the ISO 21496-1 payload.
+- Ultra HDR decode is now more tolerant of malformed files that still contain usable gain-map semantics: Adobe Extended XMP on the primary JPEG is reassembled, and if the primary JPEG lacks effective gain-map metadata but MPF points to a secondary JPEG with valid `hdrgm:*` XMP or ISO 21496-1 gain-map metadata, the file is still decoded as Ultra HDR.
 - Gain-map decoding now supports both single-channel and multichannel gain-map JPEG payloads.
 - The compatibility encoder now reuses the same gain-map computation path exposed by the new public `compute_gain_map(...)` API.
 
@@ -24,6 +26,7 @@
 - Compatibility-wrapper callers do not need to inject the built-in Display-P3 ICC manually when encoding from an HDR source tagged with `sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`, unless they want a different primary ICC than the preserved base JPEG ICC or the built-in default.
 - Policy-aware callers that previously had to route through the compatibility encoder just to compute a gain map can now use `compute_gain_map(...)` and then package through `encode(...)`.
 - If you want a single-call wrapper, use `encode_ultra_hdr(...)`, but keep in mind that `UltraHdrEncodeOptions::primary.gain_map` must remain `None` because the gain map is computed by the wrapper itself.
+- No public API signatures changed for the metadata-placement fix; the observable change is that encoded Ultra HDR files now place primary container metadata and gain-map metadata in different codestreams, and decode can recover effective gain-map metadata from the secondary JPEG when needed.
 
 ## 0.3.0
 

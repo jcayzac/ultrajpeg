@@ -1,8 +1,9 @@
 use crate::{
     error::{Error, Result},
     metadata::{
-        COLOR_MARKER_PREFIX, ISO_NAMESPACE, XMP_NAMESPACE, decode_color_metadata,
-        encode_color_metadata, iso_segment_payload, xmp_segment_payload,
+        COLOR_MARKER_PREFIX, EncodedUltraHdrMetadata, ISO_NAMESPACE, XMP_NAMESPACE,
+        decode_color_metadata, encode_color_metadata, iso_segment_payload,
+        parse_ultra_hdr_metadata, xmp_segment_payload,
     },
     types::{ColorMetadata, DecodeOptions, UltraHdrMetadata},
 };
@@ -14,6 +15,12 @@ use ultrahdr_core::metadata::{MPF_IDENTIFIER, create_mpf_header, find_jpeg_bound
 
 const EXIF_DATA_PREFIX: &[u8] = b"Exif\0\0";
 const ICC_DATA_PREFIX: &[u8] = b"ICC_PROFILE\0";
+const EXTENDED_XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
+const EXTENDED_XMP_GUID_LEN: usize = 32;
+const EXTENDED_XMP_LENGTH_LEN: usize = 4;
+const EXTENDED_XMP_OFFSET_LEN: usize = 4;
+const EXTENDED_XMP_HEADER_LEN: usize =
+    EXTENDED_XMP_GUID_LEN + EXTENDED_XMP_LENGTH_LEN + EXTENDED_XMP_OFFSET_LEN;
 
 pub(crate) struct ParsedContainer<'a> {
     pub(crate) primary_jpeg: &'a [u8],
@@ -35,13 +42,15 @@ pub(crate) fn inspect_container(bytes: &[u8]) -> Result<InspectedContainer> {
     let primary_range = primary_range(bytes)?;
     let primary_jpeg = &bytes[primary_range.0..primary_range.1];
     let scanned = scan_primary_metadata(primary_jpeg)?;
+    let gain_map_range = gain_map_range(bytes);
+    let effective_metadata = effective_ultra_hdr_sources(bytes, &scanned, gain_map_range)?;
 
     Ok(InspectedContainer {
         primary_jpeg_len: primary_jpeg.len(),
-        gain_map_jpeg_len: gain_map_range(bytes).map(|range| range.1 - range.0),
+        gain_map_jpeg_len: gain_map_range.map(|range| range.1 - range.0),
         color_metadata: scanned.color_metadata,
-        xmp: scanned.xmp,
-        iso: scanned.iso,
+        xmp: effective_metadata.xmp,
+        iso: effective_metadata.iso,
     })
 }
 
@@ -52,9 +61,11 @@ pub(crate) fn parse_container<'a>(
     let primary_range = primary_range(bytes)?;
     let primary_jpeg = &bytes[primary_range.0..primary_range.1];
     let scanned = scan_primary_metadata(primary_jpeg)?;
+    let gain_map_range = gain_map_range(bytes);
+    let effective_metadata = effective_ultra_hdr_sources(bytes, &scanned, gain_map_range)?;
 
     let gain_map_jpeg = if options.decode_gain_map {
-        gain_map_range(bytes).map(|range| &bytes[range.0..range.1])
+        gain_map_range.map(|range| &bytes[range.0..range.1])
     } else {
         None
     };
@@ -63,8 +74,8 @@ pub(crate) fn parse_container<'a>(
         primary_jpeg,
         gain_map_jpeg,
         color_metadata: scanned.color_metadata,
-        xmp: scanned.xmp,
-        iso: scanned.iso,
+        xmp: effective_metadata.xmp,
+        iso: effective_metadata.iso,
     })
 }
 
@@ -72,7 +83,7 @@ pub(crate) fn assemble_container(
     primary_jpeg: &[u8],
     gain_map_jpeg: Option<&[u8]>,
     color_metadata: &ColorMetadata,
-    ultra_hdr_metadata: Option<&UltraHdrMetadata>,
+    ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
 ) -> Result<Vec<u8>> {
     assemble_container_impl(
         Bytes::copy_from_slice(primary_jpeg),
@@ -86,7 +97,7 @@ pub(crate) fn assemble_container_owned(
     primary_jpeg: Vec<u8>,
     gain_map_jpeg: Option<&[u8]>,
     color_metadata: &ColorMetadata,
-    ultra_hdr_metadata: Option<&UltraHdrMetadata>,
+    ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
 ) -> Result<Vec<u8>> {
     assemble_container_impl(
         Bytes::from(primary_jpeg),
@@ -100,9 +111,12 @@ fn assemble_container_impl(
     primary_jpeg: Bytes,
     gain_map_jpeg: Option<&[u8]>,
     color_metadata: &ColorMetadata,
-    ultra_hdr_metadata: Option<&UltraHdrMetadata>,
+    ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
 ) -> Result<Vec<u8>> {
     let mut jpeg = Jpeg::from_bytes(primary_jpeg)?;
+    let gain_map_jpeg = gain_map_jpeg
+        .map(|gain_map_jpeg| rewrite_gain_map_jpeg(gain_map_jpeg, ultra_hdr_metadata))
+        .transpose()?;
 
     if let Some(icc_profile) = color_metadata.icc_profile.clone() {
         jpeg.set_icc_profile(Some(Bytes::from(icc_profile)));
@@ -116,27 +130,7 @@ fn assemble_container_impl(
     let mut insert_at = metadata_insert_index(&jpeg);
 
     if let Some(ultra_hdr_metadata) = ultra_hdr_metadata {
-        if let Some(xmp) = ultra_hdr_metadata.xmp.as_deref() {
-            jpeg.segments_mut().insert(
-                insert_at,
-                JpegSegment::new_with_contents(
-                    markers::APP1,
-                    Bytes::from(xmp_segment_payload(xmp)),
-                ),
-            );
-            insert_at += 1;
-        }
-
-        if let Some(iso_21496_1) = ultra_hdr_metadata.iso_21496_1.as_deref() {
-            jpeg.segments_mut().insert(
-                insert_at,
-                JpegSegment::new_with_contents(
-                    markers::APP2,
-                    Bytes::from(iso_segment_payload(iso_21496_1)),
-                ),
-            );
-            insert_at += 1;
-        }
+        insert_at = insert_xmp_segment(&mut jpeg, insert_at, Some(&ultra_hdr_metadata.primary_xmp));
     }
 
     if let Some(explicit_color) = encode_color_metadata(color_metadata) {
@@ -147,7 +141,7 @@ fn assemble_container_impl(
         insert_at += 1;
     }
 
-    if let Some(gain_map_jpeg) = gain_map_jpeg {
+    if let Some(gain_map_jpeg) = gain_map_jpeg.as_deref() {
         let insertion_offset = byte_offset_for_index(&jpeg, insert_at);
         let header_len = create_mpf_header(0, gain_map_jpeg.len(), Some(insertion_offset)).len();
         let primary_len = jpeg.len() + header_len;
@@ -161,7 +155,7 @@ fn assemble_container_impl(
 
     let mut output = jpeg.encoder().bytes().to_vec();
     if let Some(gain_map_jpeg) = gain_map_jpeg {
-        output.extend_from_slice(gain_map_jpeg);
+        output.extend_from_slice(&gain_map_jpeg);
     }
     Ok(output)
 }
@@ -200,6 +194,19 @@ struct ScannedMetadata {
     iso: Option<Vec<u8>>,
 }
 
+struct EffectiveUltraHdrSources {
+    xmp: Option<String>,
+    iso: Option<Vec<u8>>,
+}
+
+#[derive(Debug)]
+struct ExtendedXmpChunk {
+    guid: String,
+    total_length: u32,
+    offset: u32,
+    data: Vec<u8>,
+}
+
 fn scan_primary_metadata(primary_jpeg: &[u8]) -> Result<ScannedMetadata> {
     if primary_jpeg.len() < 4 || primary_jpeg[0] != markers::P || primary_jpeg[1] != markers::SOI {
         return Err(Error::Container("invalid JPEG signature".into()));
@@ -212,6 +219,7 @@ fn scan_primary_metadata(primary_jpeg: &[u8]) -> Result<ScannedMetadata> {
     let mut iso = None;
     let mut gamut = None;
     let mut transfer = None;
+    let mut extended_xmp_chunks = Vec::new();
 
     while offset + 1 < primary_jpeg.len() {
         if primary_jpeg[offset] != markers::P {
@@ -249,6 +257,9 @@ fn scan_primary_metadata(primary_jpeg: &[u8]) -> Result<ScannedMetadata> {
                     Error::Metadata(format!("invalid UTF-8 XMP payload: {error}"))
                 })?);
             }
+            markers::APP1 if contents.starts_with(EXTENDED_XMP_NAMESPACE) => {
+                extended_xmp_chunks.push(parse_extended_xmp_chunk(contents)?);
+            }
             markers::APP2 if contents.starts_with(ICC_DATA_PREFIX) => {
                 let chunk = parse_icc_chunk(contents)?;
                 icc_chunks.push(chunk);
@@ -277,9 +288,166 @@ fn scan_primary_metadata(primary_jpeg: &[u8]) -> Result<ScannedMetadata> {
             gamut,
             transfer,
         },
-        xmp,
+        xmp: reassemble_xmp(xmp, extended_xmp_chunks)?,
         iso,
     })
+}
+
+fn parse_extended_xmp_chunk(contents: &[u8]) -> Result<ExtendedXmpChunk> {
+    let header_start = EXTENDED_XMP_NAMESPACE.len();
+    let minimum_len = header_start + EXTENDED_XMP_HEADER_LEN;
+    if contents.len() < minimum_len {
+        return Err(Error::Container(
+            "truncated Adobe extended XMP segment".into(),
+        ));
+    }
+
+    let guid_bytes = &contents[header_start..header_start + EXTENDED_XMP_GUID_LEN];
+    let guid = std::str::from_utf8(guid_bytes)
+        .map_err(|error| Error::Metadata(format!("invalid extended XMP GUID: {error}")))?
+        .to_owned();
+
+    let total_length_start = header_start + EXTENDED_XMP_GUID_LEN;
+    let total_length = u32::from_be_bytes(
+        contents[total_length_start..total_length_start + EXTENDED_XMP_LENGTH_LEN]
+            .try_into()
+            .expect("extended XMP total length field has fixed width"),
+    );
+
+    let offset_start = total_length_start + EXTENDED_XMP_LENGTH_LEN;
+    let offset = u32::from_be_bytes(
+        contents[offset_start..offset_start + EXTENDED_XMP_OFFSET_LEN]
+            .try_into()
+            .expect("extended XMP offset field has fixed width"),
+    );
+
+    Ok(ExtendedXmpChunk {
+        guid,
+        total_length,
+        offset,
+        data: contents[offset_start + EXTENDED_XMP_OFFSET_LEN..].to_vec(),
+    })
+}
+
+fn reassemble_xmp(
+    primary_xmp: Option<String>,
+    mut extended_chunks: Vec<ExtendedXmpChunk>,
+) -> Result<Option<String>> {
+    let Some(primary_xmp) = primary_xmp else {
+        return Ok(None);
+    };
+
+    let Some(extended_guid) = extract_extended_xmp_guid(&primary_xmp) else {
+        return Ok(Some(primary_xmp));
+    };
+
+    extended_chunks.retain(|chunk| chunk.guid == extended_guid);
+    if extended_chunks.is_empty() {
+        return Ok(Some(primary_xmp));
+    }
+
+    extended_chunks.sort_by_key(|chunk| chunk.offset);
+
+    let expected_total_length = extended_chunks[0].total_length as usize;
+    let mut extended = vec![0_u8; expected_total_length];
+    let mut filled = vec![false; expected_total_length];
+
+    for chunk in extended_chunks {
+        if chunk.total_length as usize != expected_total_length {
+            return Err(Error::Container(
+                "inconsistent Adobe extended XMP total length".into(),
+            ));
+        }
+
+        let start = chunk.offset as usize;
+        let end = start
+            .checked_add(chunk.data.len())
+            .ok_or_else(|| Error::Container("Adobe extended XMP offset overflow".into()))?;
+        if end > expected_total_length {
+            return Err(Error::Container(
+                "Adobe extended XMP chunk exceeds advertised total length".into(),
+            ));
+        }
+
+        extended[start..end].copy_from_slice(&chunk.data);
+        filled[start..end].fill(true);
+    }
+
+    if filled.iter().any(|filled| !filled) {
+        return Err(Error::Container(
+            "Adobe extended XMP chunks are incomplete".into(),
+        ));
+    }
+
+    let extended_xmp = String::from_utf8(extended)
+        .map_err(|error| Error::Metadata(format!("invalid UTF-8 extended XMP payload: {error}")))?;
+
+    Ok(Some(format!("{primary_xmp}\n{extended_xmp}")))
+}
+
+fn effective_ultra_hdr_sources(
+    bytes: &[u8],
+    primary: &ScannedMetadata,
+    gain_map_range: Option<(usize, usize)>,
+) -> Result<EffectiveUltraHdrSources> {
+    let primary_metadata =
+        parse_ultra_hdr_metadata(primary.xmp.as_deref(), primary.iso.as_deref())?;
+    if has_effective_gain_map_metadata(primary_metadata.as_ref()) {
+        return Ok(EffectiveUltraHdrSources {
+            xmp: primary.xmp.clone(),
+            iso: primary.iso.clone(),
+        });
+    }
+
+    let Some(gain_map_range) = gain_map_range else {
+        return Ok(EffectiveUltraHdrSources {
+            xmp: primary.xmp.clone(),
+            iso: primary.iso.clone(),
+        });
+    };
+
+    let gain_map_jpeg = &bytes[gain_map_range.0..gain_map_range.1];
+    let gain_map_metadata = scan_primary_metadata(gain_map_jpeg)?;
+    let parsed_gain_map_metadata = parse_ultra_hdr_metadata(
+        gain_map_metadata.xmp.as_deref(),
+        gain_map_metadata.iso.as_deref(),
+    )?;
+
+    if has_effective_gain_map_metadata(parsed_gain_map_metadata.as_ref()) {
+        return Ok(EffectiveUltraHdrSources {
+            xmp: gain_map_metadata.xmp,
+            iso: gain_map_metadata.iso,
+        });
+    }
+
+    Ok(EffectiveUltraHdrSources {
+        xmp: primary.xmp.clone(),
+        iso: primary.iso.clone(),
+    })
+}
+
+fn has_effective_gain_map_metadata(metadata: Option<&UltraHdrMetadata>) -> bool {
+    metadata
+        .and_then(|metadata| metadata.gain_map_metadata.as_ref())
+        .is_some()
+}
+
+fn extract_extended_xmp_guid(xmp: &str) -> Option<String> {
+    extract_xmp_attribute(xmp, "xmpNote:HasExtendedXMP")
+}
+
+fn extract_xmp_attribute(xmp: &str, attribute: &str) -> Option<String> {
+    for quote in ['"', '\''] {
+        let pattern = format!("{attribute}={quote}");
+        if let Some(start) = xmp.find(&pattern) {
+            let value_start = start + pattern.len();
+            if let Some(end) = xmp[value_start..].find(quote) {
+                return Some(xmp[value_start..value_start + end].to_owned());
+            }
+        }
+    }
+
+    None
 }
 
 fn parse_icc_chunk(contents: &[u8]) -> Result<(u8, u8, &[u8])> {
@@ -292,6 +460,55 @@ fn parse_icc_chunk(contents: &[u8]) -> Result<(u8, u8, &[u8])> {
         contents[ICC_DATA_PREFIX.len() + 1],
         &contents[ICC_DATA_PREFIX.len() + 2..],
     ))
+}
+
+fn rewrite_gain_map_jpeg(
+    gain_map_jpeg: &[u8],
+    ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
+) -> Result<Vec<u8>> {
+    let Some(ultra_hdr_metadata) = ultra_hdr_metadata else {
+        return Ok(gain_map_jpeg.to_vec());
+    };
+
+    let mut jpeg = Jpeg::from_bytes(Bytes::copy_from_slice(gain_map_jpeg))?;
+    remove_embedded_metadata_segments(&mut jpeg);
+
+    let mut insert_at = metadata_insert_index(&jpeg);
+    insert_at = insert_xmp_segment(&mut jpeg, insert_at, Some(&ultra_hdr_metadata.gain_map_xmp));
+    insert_iso_segment(
+        &mut jpeg,
+        insert_at,
+        Some(ultra_hdr_metadata.gain_map_iso_21496_1.as_slice()),
+    );
+
+    Ok(jpeg.encoder().bytes().to_vec())
+}
+
+fn insert_xmp_segment(jpeg: &mut Jpeg, insert_at: usize, xmp: Option<&str>) -> usize {
+    let Some(xmp) = xmp else {
+        return insert_at;
+    };
+
+    jpeg.segments_mut().insert(
+        insert_at,
+        JpegSegment::new_with_contents(markers::APP1, Bytes::from(xmp_segment_payload(xmp))),
+    );
+    insert_at + 1
+}
+
+fn insert_iso_segment(jpeg: &mut Jpeg, insert_at: usize, iso_21496_1: Option<&[u8]>) -> usize {
+    let Some(iso_21496_1) = iso_21496_1 else {
+        return insert_at;
+    };
+
+    jpeg.segments_mut().insert(
+        insert_at,
+        JpegSegment::new_with_contents(
+            markers::APP2,
+            Bytes::from(iso_segment_payload(iso_21496_1)),
+        ),
+    );
+    insert_at + 1
 }
 
 fn assemble_icc_profile(mut chunks: Vec<(u8, u8, &[u8])>) -> Result<Option<Vec<u8>>> {
@@ -364,6 +581,15 @@ fn remove_metadata_segments(jpeg: &mut Jpeg) {
         !((segment.marker() == markers::APP1 && contents.starts_with(XMP_NAMESPACE))
             || (segment.marker() == markers::APP2
                 && (contents.starts_with(ISO_NAMESPACE) || contents.starts_with(MPF_IDENTIFIER)))
+            || (segment.marker() == markers::APP11 && contents.starts_with(COLOR_MARKER_PREFIX)))
+    });
+}
+
+fn remove_embedded_metadata_segments(jpeg: &mut Jpeg) {
+    jpeg.segments_mut().retain(|segment| {
+        let contents = segment.contents();
+        !((segment.marker() == markers::APP1 && contents.starts_with(XMP_NAMESPACE))
+            || (segment.marker() == markers::APP2 && contents.starts_with(ISO_NAMESPACE))
             || (segment.marker() == markers::APP11 && contents.starts_with(COLOR_MARKER_PREFIX)))
     });
 }
