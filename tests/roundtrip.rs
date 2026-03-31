@@ -295,6 +295,12 @@ fn compat_ultrahdr_api_matches_wrapper_flow() {
     assert_eq!(gamut, sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3);
     assert_eq!(transfer, sys::uhdr_color_transfer::UHDR_CT_PQ);
     assert_eq!(range, sys::uhdr_color_range::UHDR_CR_FULL_RANGE);
+
+    let inspected = inspect(&encoded).unwrap();
+    assert_eq!(
+        inspected.color_metadata.icc_profile.as_deref(),
+        Some(icc::display_p3())
+    );
 }
 
 #[test]
@@ -354,6 +360,70 @@ fn compat_owned_buffer_constructors_work() {
 
     let encoded = encoder.encoded_stream().unwrap().bytes().unwrap();
     assert!(!encoded.is_empty());
+}
+
+#[test]
+fn compat_encoder_preserves_existing_primary_icc_profile() {
+    let base = jpeg::Encoder::new(jpeg::Preset::ProgressiveSmallest)
+        .quality(90)
+        .icc_profile(b"custom-base-icc".to_vec())
+        .encode_rgb(sample_primary().data.as_slice(), 4, 4)
+        .unwrap();
+
+    let hdr_pixels = [
+        0x000000c0u32,
+        0x100080c0,
+        0x200100c0,
+        0x300180c0,
+        0x080100c0,
+        0x180180c0,
+        0x280200c0,
+        0x380280c0,
+        0x100200c0,
+        0x200280c0,
+        0x300300c0,
+        0x3ff380c0,
+        0x180300c0,
+        0x280380c0,
+        0x3803c0c0,
+        0x3ff3ffc0,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect::<Vec<_>>();
+
+    let hdr_raw = CompatRawImage::packed_owned(
+        sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
+        4,
+        4,
+        hdr_pixels,
+        sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3,
+        sys::uhdr_color_transfer::UHDR_CT_PQ,
+        sys::uhdr_color_range::UHDR_CR_FULL_RANGE,
+    )
+    .unwrap();
+    let base_compressed = CompressedImage::from_vec(
+        base,
+        sys::uhdr_color_gamut::UHDR_CG_BT_709,
+        sys::uhdr_color_transfer::UHDR_CT_SRGB,
+        sys::uhdr_color_range::UHDR_CR_FULL_RANGE,
+    );
+
+    let mut encoder = CompatEncoder::new().unwrap();
+    encoder
+        .set_raw_image_owned(hdr_raw, ImgLabel::UHDR_HDR_IMG)
+        .unwrap();
+    encoder
+        .set_compressed_image_owned(base_compressed, ImgLabel::UHDR_SDR_IMG)
+        .unwrap();
+    encoder.encode().unwrap();
+
+    let encoded = encoder.encoded_stream().unwrap().bytes().unwrap();
+    let inspected = inspect(encoded).unwrap();
+    assert_eq!(
+        inspected.color_metadata.icc_profile.as_deref(),
+        Some(b"custom-base-icc".as_slice())
+    );
 }
 
 #[test]

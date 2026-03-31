@@ -5,7 +5,7 @@ use crate::{
     container::assemble_container,
     decode_hdr_output,
     error::{Error, Result},
-    inspect,
+    icc, inspect,
     metadata::build_ultra_hdr_metadata,
     types::{ChromaSubsampling, ColorMetadata},
 };
@@ -331,6 +331,15 @@ impl<'a> Encoder<'a> {
         Ok(self)
     }
 
+    /// Encode an Ultra HDR JPEG from the configured SDR base JPEG and HDR input.
+    ///
+    /// ICC handling for the primary JPEG is explicit:
+    ///
+    /// - if the SDR base JPEG already contains an ICC profile, it is preserved
+    /// - if the SDR base JPEG has no ICC profile and the HDR input gamut is
+    ///   [`sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`], the crate injects its
+    ///   built-in Display-P3 ICC profile automatically
+    /// - for other HDR input gamuts, no ICC profile is auto-injected
     pub fn encode(&mut self) -> Result<()> {
         if self.output_format != sys::uhdr_codec::UHDR_CODEC_JPG {
             return Err(Error::UnsupportedFormat(
@@ -367,11 +376,18 @@ impl<'a> Encoder<'a> {
             &ColorMetadata::default(),
         )?;
         let ultra_hdr_metadata = build_ultra_hdr_metadata(&metadata, gain_map_jpeg.len());
+        let primary_icc_profile = inspect(sdr.bytes.as_ref())?
+            .color_metadata
+            .icc_profile
+            .or_else(|| {
+                (hdr_raw.color_gamut == sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3)
+                    .then(|| icc::display_p3().to_vec())
+            });
         let bytes = assemble_container(
             sdr.bytes.as_ref(),
             Some(&gain_map_jpeg),
             &ColorMetadata {
-                icc_profile: None,
+                icc_profile: primary_icc_profile,
                 exif: None,
                 gamut: Some(core_gamut_from_compat(hdr_raw.color_gamut)?),
                 transfer: Some(core_transfer_from_compat(hdr_raw.color_transfer)?),

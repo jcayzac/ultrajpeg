@@ -41,6 +41,7 @@ The crate also exposes compatibility wrappers for a small `mozjpeg_rs`-style JPE
   - setting an SDR base JPEG
   - setting packed HDR input pixels
   - encoding an UltraHDR JPEG
+  - preserving a base JPEG ICC profile or, when the base JPEG has no ICC and the HDR input gamut is `sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`, auto-injecting the built-in Display-P3 ICC
   - borrowing JPEG input slices without copying them
   - probing gain-map metadata
   - decoding a packed PQ HDR view
@@ -130,6 +131,15 @@ assert_eq!(options.color_metadata.icc_profile.as_deref(), Some(raw_profile));
 assert_eq!(options.color_metadata.gamut, Some(ColorGamut::DisplayP3));
 assert_eq!(options.color_metadata.transfer, Some(ColorTransfer::Srgb));
 ```
+
+## Compatibility ICC Behavior
+
+When using the `ultrajpeg::{Encoder, RawImage, CompressedImage, sys}` compatibility
+API to encode an Ultra HDR JPEG:
+
+- if the SDR base JPEG already contains an ICC profile, `ultrajpeg` preserves it
+- if the SDR base JPEG has no ICC profile and the HDR input gamut is `sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`, `ultrajpeg` injects the built-in Display-P3 ICC profile automatically
+- for other HDR input gamuts, the compatibility encoder does not auto-inject an ICC profile
 
 ## Decode Example
 
