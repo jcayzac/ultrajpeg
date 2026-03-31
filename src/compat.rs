@@ -2,17 +2,17 @@ use std::borrow::Cow;
 
 use crate::{
     codec::{decode_primary_image, encode_image},
+    compute_gain_map,
     container::assemble_container,
     decode_hdr_output,
     error::{Error, Result},
     icc, inspect,
     metadata::build_ultra_hdr_metadata,
-    types::{ChromaSubsampling, ColorMetadata},
+    types::{ChromaSubsampling, ColorMetadata, ComputeGainMapOptions},
 };
 use ultrahdr_core::{
-    ColorGamut as CoreColorGamut, ColorTransfer as CoreColorTransfer, GainMapConfig,
-    GainMapMetadata, PixelFormat, RawImage as CoreRawImage, Unstoppable,
-    gainmap::{HdrOutputFormat, compute_gainmap},
+    ColorGamut as CoreColorGamut, ColorTransfer as CoreColorTransfer, GainMapMetadata, PixelFormat,
+    RawImage as CoreRawImage, gainmap::HdrOutputFormat,
 };
 
 pub type ColorGamut = sys::uhdr_color_gamut::Type;
@@ -358,24 +358,15 @@ impl<'a> Encoder<'a> {
 
         let hdr_core = compat_raw_to_core(hdr_raw)?;
         let sdr_core = decode_primary_image(sdr.bytes.as_ref())?;
-        let (gain_map, metadata) =
-            compute_gainmap(&hdr_core, &sdr_core, &GainMapConfig::default(), Unstoppable)?;
-        let gain_map_core = CoreRawImage::from_data(
-            gain_map.width,
-            gain_map.height,
-            PixelFormat::Gray8,
-            CoreColorGamut::Bt709,
-            CoreColorTransfer::Linear,
-            gain_map.data.clone(),
-        )?;
+        let computed = compute_gain_map(&hdr_core, &sdr_core, &ComputeGainMapOptions::default())?;
         let gain_map_jpeg = encode_image(
-            &gain_map_core,
+            &computed.image,
             self.gain_map_quality,
             false,
             ChromaSubsampling::Yuv444,
             &ColorMetadata::default(),
         )?;
-        let ultra_hdr_metadata = build_ultra_hdr_metadata(&metadata, gain_map_jpeg.len());
+        let ultra_hdr_metadata = build_ultra_hdr_metadata(&computed.metadata, gain_map_jpeg.len());
         let primary_icc_profile = inspect(sdr.bytes.as_ref())?
             .color_metadata
             .icc_profile

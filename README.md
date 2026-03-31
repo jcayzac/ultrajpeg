@@ -16,12 +16,14 @@ It provides a native Rust API for encoding and decoding plain JPEG images, MPF-b
 - Decode gain-map JPEG payloads
 - Parse UltraHDR XMP gain-map metadata
 - Parse ISO 21496-1 binary gain-map metadata
+- Prefer ISO 21496-1 over XMP when both metadata forms are present
 - Reconstruct an HDR packed or linear view from a decoded gain map
 - Decode large UltraHDR primary and gain-map JPEG payloads in parallel internally
 
 ### Encode
 
 - Encode a primary JPEG image from `ultrahdr_core::RawImage`
+- Compute gain maps from caller-provided HDR and SDR primary images
 - Encode a gain-map JPEG image
 - Ship a built-in Display-P3 ICC profile helper and a spec-friendly Ultra HDR preset
 - Write ICC profiles and EXIF payloads
@@ -65,10 +67,12 @@ The crate is split into layers:
 The public high-level API lives in:
 
 - `ultrajpeg::icc::display_p3`
+- `ultrajpeg::compute_gain_map`
 - `ultrajpeg::inspect`
 - `ultrajpeg::decode`
 - `ultrajpeg::decode_with_options`
 - `ultrajpeg::encode`
+- `ultrajpeg::encode_ultra_hdr`
 - `ultrajpeg::UltraJpegEncoder`
 
 ## Performance Notes
@@ -76,6 +80,21 @@ The public high-level API lives in:
 - `ultrajpeg::inspect` parses container markers without decoding pixels.
 - The compatibility wrappers can borrow JPEG input directly with `CompressedImage::from_slice` and `Decoder::set_image_slice`.
 - Large UltraHDR decodes may use internal Rayon-based parallelism for primary-image and gain-map JPEG decode. This is internal only; there is no async API and no thread-management API exposed by the crate.
+
+## Metadata Precedence
+
+When both Ultra HDR XMP and ISO 21496-1 metadata are present, `ultrajpeg`
+prefers ISO 21496-1 for the effective parsed `gain_map_metadata`.
+
+The raw XMP and ISO payloads are still exposed separately on `UltraHdrMetadata`.
+
+`ultrajpeg` also applies a small defensive filter before accepting XMP fallback:
+
+- XMP with `hdrgm:BaseRenditionIsHDR="True"` is rejected
+- XMP fallback is rejected if key required fields are missing
+
+This is only a lightweight guard layer in `ultrajpeg`, not a full replacement
+for stricter upstream XMP validation.
 
 ## Quick Start
 
@@ -140,6 +159,56 @@ API to encode an Ultra HDR JPEG:
 - if the SDR base JPEG already contains an ICC profile, `ultrajpeg` preserves it
 - if the SDR base JPEG has no ICC profile and the HDR input gamut is `sys::uhdr_color_gamut::UHDR_CG_DISPLAY_P3`, `ultrajpeg` injects the built-in Display-P3 ICC profile automatically
 - for other HDR input gamuts, the compatibility encoder does not auto-inject an ICC profile
+
+## Compute Then Encode
+
+For policy-aware consumers, the intended seam is:
+
+1. prepare the SDR primary image yourself,
+2. compute a gain map from HDR + that chosen primary image,
+3. package the result through the structured encode API.
+
+```rust
+use ultrahdr_core::{PixelFormat, RawImage};
+use ultrajpeg::{ComputeGainMapOptions, EncodeOptions, compute_gain_map};
+
+let hdr = RawImage::new(8, 8, PixelFormat::Rgba32F)?;
+let primary = RawImage::new(8, 8, PixelFormat::Rgb8)?;
+
+let computed = compute_gain_map(&hdr, &primary, &ComputeGainMapOptions::default())?;
+let options = EncodeOptions {
+    gain_map: Some(computed.into_encode_options(90, false)),
+    ..EncodeOptions::ultra_hdr_defaults()
+};
+
+let bytes = ultrajpeg::encode(&primary, &options)?;
+# let _ = bytes;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+This keeps primary-image color policy in the consumer while `ultrajpeg` handles
+gain-map computation and Ultra HDR packaging.
+
+`ComputeGainMapOptions::default()` computes a single-channel gain map. Use
+`GainMapChannels::Multi` only when you intentionally want a multichannel gain
+map.
+
+## Convenience Wrapper
+
+If you already have both the HDR image and the caller-chosen SDR primary image,
+you can use the thin convenience wrapper instead:
+
+```rust
+use ultrahdr_core::{PixelFormat, RawImage};
+use ultrajpeg::{UltraHdrEncodeOptions, encode_ultra_hdr};
+
+let hdr = RawImage::new(8, 8, PixelFormat::Rgba32F)?;
+let primary = RawImage::new(8, 8, PixelFormat::Rgb8)?;
+
+let bytes = encode_ultra_hdr(&hdr, &primary, &UltraHdrEncodeOptions::default())?;
+# let _ = bytes;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ## Decode Example
 

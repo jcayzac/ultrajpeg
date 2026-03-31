@@ -90,6 +90,34 @@ pub struct GainMapEncodeOptions {
     pub progressive: bool,
 }
 
+/// Gain-map channel layout for computed Ultra HDR metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GainMapChannels {
+    /// Compute a single-channel luminance gain map.
+    #[default]
+    Single,
+    /// Compute a multichannel RGB gain map.
+    Multi,
+}
+
+/// Options for gain-map computation from HDR and SDR primary images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ComputeGainMapOptions {
+    /// Whether the computed gain map should be single-channel or multichannel.
+    ///
+    /// The default is [`GainMapChannels::Single`].
+    pub channels: GainMapChannels,
+}
+
+/// Result of computing an Ultra HDR gain map from HDR and SDR images.
+#[derive(Debug, Clone)]
+pub struct ComputedGainMap {
+    /// Gain-map image pixels ready to be JPEG-encoded and bundled.
+    pub image: RawImage,
+    /// Gain-map metadata ready to be serialized as Ultra HDR XMP and ISO 21496-1.
+    pub metadata: GainMapMetadata,
+}
+
 /// Encode configuration for the primary image and optional bundled gain map.
 #[derive(Debug, Clone)]
 pub struct EncodeOptions {
@@ -105,6 +133,19 @@ pub struct EncodeOptions {
     pub gain_map: Option<GainMapEncodeOptions>,
 }
 
+/// High-level convenience options for direct Ultra HDR packaging from HDR and SDR inputs.
+#[derive(Debug, Clone)]
+pub struct UltraHdrEncodeOptions {
+    /// Primary JPEG encoding options. `gain_map` must be `None`.
+    pub primary: EncodeOptions,
+    /// Gain-map computation policy.
+    pub gain_map: ComputeGainMapOptions,
+    /// JPEG quality for the computed secondary gain-map codestream.
+    pub gain_map_quality: u8,
+    /// Whether to emit the computed secondary gain-map JPEG as progressive.
+    pub gain_map_progressive: bool,
+}
+
 impl Default for EncodeOptions {
     fn default() -> Self {
         Self {
@@ -113,6 +154,17 @@ impl Default for EncodeOptions {
             chroma_subsampling: ChromaSubsampling::Yuv420,
             color_metadata: ColorMetadata::default(),
             gain_map: None,
+        }
+    }
+}
+
+impl Default for UltraHdrEncodeOptions {
+    fn default() -> Self {
+        Self {
+            primary: EncodeOptions::ultra_hdr_defaults(),
+            gain_map: ComputeGainMapOptions::default(),
+            gain_map_quality: 90,
+            gain_map_progressive: false,
         }
     }
 }
@@ -171,6 +223,19 @@ impl EncodeOptions {
         Self {
             color_metadata: ColorMetadata::display_p3(),
             ..Self::default()
+        }
+    }
+}
+
+impl ComputedGainMap {
+    /// Convert a computed gain map into bundling options for [`EncodeOptions::gain_map`].
+    #[must_use]
+    pub fn into_encode_options(self, quality: u8, progressive: bool) -> GainMapEncodeOptions {
+        GainMapEncodeOptions {
+            image: self.image,
+            metadata: self.metadata,
+            quality,
+            progressive,
         }
     }
 }

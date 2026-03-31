@@ -29,9 +29,11 @@ pub(crate) fn parse_ultra_hdr_metadata(
     xmp: Option<&str>,
     iso: Option<&[u8]>,
 ) -> Result<Option<UltraHdrMetadata>> {
-    let gain_map_from_xmp = xmp.and_then(|xmp_data| parse_xmp(xmp_data).ok().map(|pair| pair.0));
+    let gain_map_from_xmp = xmp
+        .filter(|xmp_data| xmp_passes_defensive_checks(xmp_data))
+        .and_then(|xmp_data| parse_xmp(xmp_data).ok().map(|pair| pair.0));
     let gain_map_from_iso = iso.and_then(|iso_data| deserialize_iso21496(iso_data).ok());
-    let gain_map_metadata = gain_map_from_xmp.or(gain_map_from_iso);
+    let gain_map_metadata = gain_map_from_iso.or(gain_map_from_xmp);
 
     if xmp.is_none() && iso.is_none() && gain_map_metadata.is_none() {
         return Ok(None);
@@ -42,6 +44,36 @@ pub(crate) fn parse_ultra_hdr_metadata(
         iso_21496_1: iso.map(ToOwned::to_owned),
         gain_map_metadata,
     }))
+}
+
+fn xmp_passes_defensive_checks(xmp: &str) -> bool {
+    if xmp_contains_base_rendition_is_hdr_true(xmp) {
+        return false;
+    }
+
+    if !looks_like_ultra_hdr_xmp(xmp) {
+        return true;
+    }
+
+    let required_fields = ["hdrgm:Version", "hdrgm:GainMapMax", "hdrgm:HDRCapacityMax"];
+    required_fields.into_iter().all(|field| xmp.contains(field))
+}
+
+fn looks_like_ultra_hdr_xmp(xmp: &str) -> bool {
+    xmp.contains("hdrgm:")
+        || xmp.contains("Item:Semantic=\"GainMap\"")
+        || xmp.contains("Item:Semantic='GainMap'")
+}
+
+fn xmp_contains_base_rendition_is_hdr_true(xmp: &str) -> bool {
+    [
+        "hdrgm:BaseRenditionIsHDR=\"True",
+        "hdrgm:BaseRenditionIsHDR='True",
+        "hdrgm:BaseRenditionIsHDR=\"true",
+        "hdrgm:BaseRenditionIsHDR='true",
+    ]
+    .into_iter()
+    .any(|needle| xmp.contains(needle))
 }
 
 pub(crate) fn xmp_segment_payload(xmp: &str) -> Vec<u8> {

@@ -2,8 +2,9 @@ use ultrahdr_core::{
     ColorGamut, ColorTransfer, GainMapMetadata, PixelFormat, RawImage, gainmap::HdrOutputFormat,
 };
 use ultrajpeg::{
-    ColorMetadata, DecodeOptions, EncodeOptions, GainMapEncodeOptions, UltraJpegEncoder, decode,
-    decode_with_options, icc, inspect,
+    ColorMetadata, ComputeGainMapOptions, DecodeOptions, EncodeOptions, GainMapChannels,
+    GainMapEncodeOptions, UltraHdrEncodeOptions, UltraJpegEncoder, compute_gain_map, decode,
+    decode_with_options, encode_ultra_hdr, icc, inspect,
 };
 use ultrajpeg::{
     CompressedImage, Decoder as CompatDecoder, Encoder as CompatEncoder, ImgLabel,
@@ -45,6 +46,23 @@ fn sample_gain_map() -> RawImage {
     .expect("sample gain map image")
 }
 
+fn sample_multichannel_gain_map() -> RawImage {
+    RawImage::from_data(
+        4,
+        4,
+        PixelFormat::Rgb8,
+        ColorGamut::Bt709,
+        ColorTransfer::Linear,
+        vec![
+            0, 32, 64, 32, 64, 96, 64, 96, 128, 96, 128, 160, //
+            16, 48, 80, 48, 80, 112, 80, 112, 144, 112, 144, 176, //
+            32, 64, 96, 64, 96, 128, 96, 128, 160, 128, 160, 192, //
+            48, 80, 112, 80, 112, 144, 112, 144, 176, 144, 176, 208, //
+        ],
+    )
+    .expect("sample multichannel gain map image")
+}
+
 fn sample_gain_map_metadata() -> GainMapMetadata {
     GainMapMetadata {
         max_content_boost: [4.0; 3],
@@ -56,6 +74,60 @@ fn sample_gain_map_metadata() -> GainMapMetadata {
         hdr_capacity_max: 4.0,
         use_base_color_space: true,
     }
+}
+
+fn sample_multichannel_gain_map_metadata() -> GainMapMetadata {
+    GainMapMetadata {
+        max_content_boost: [4.0, 8.0, 2.0],
+        min_content_boost: [1.0, 1.0, 1.0],
+        gamma: [1.0, 1.2, 1.4],
+        offset_sdr: [1.0 / 64.0; 3],
+        offset_hdr: [1.0 / 64.0; 3],
+        hdr_capacity_min: 1.0,
+        hdr_capacity_max: 8.0,
+        use_base_color_space: true,
+    }
+}
+
+fn sample_bt709_primary() -> RawImage {
+    let mut primary = sample_primary();
+    primary.gamut = ColorGamut::Bt709;
+    primary.transfer = ColorTransfer::Srgb;
+    primary
+}
+
+fn sample_hdr() -> RawImage {
+    let pixels = [
+        [2.0f32, 0.0, 0.0, 1.0],
+        [1.5, 0.6, 0.0, 1.0],
+        [0.4, 1.8, 0.0, 1.0],
+        [0.3, 0.4, 1.6, 1.0],
+        [0.0, 1.5, 0.0, 1.0],
+        [0.0, 0.7, 1.6, 1.0],
+        [0.0, 1.8, 1.4, 1.0],
+        [1.8, 0.0, 1.5, 1.0],
+        [0.0, 0.0, 1.7, 1.0],
+        [0.6, 0.8, 1.7, 1.0],
+        [0.9, 1.4, 2.0, 1.0],
+        [1.7, 1.9, 1.2, 1.0],
+        [0.1, 0.1, 0.1, 1.0],
+        [0.2, 0.2, 0.2, 1.0],
+        [0.8, 0.8, 0.8, 1.0],
+        [1.2, 1.2, 1.2, 1.0],
+    ]
+    .into_iter()
+    .flat_map(|rgba| rgba.into_iter().flat_map(f32::to_le_bytes))
+    .collect::<Vec<_>>();
+
+    RawImage::from_data(
+        4,
+        4,
+        PixelFormat::Rgba32F,
+        ColorGamut::DisplayP3,
+        ColorTransfer::Linear,
+        pixels,
+    )
+    .expect("sample hdr image")
 }
 
 #[test]
@@ -151,6 +223,347 @@ fn decode_options_can_skip_gain_map_decoding() {
 
     assert!(decoded.gain_map.is_none());
     assert!(decoded.ultra_hdr.is_some());
+}
+
+#[test]
+fn high_level_gain_map_encode_auto_injects_display_p3_icc_for_display_p3_primary() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 75,
+            progressive: false,
+        }),
+        ..EncodeOptions::default()
+    };
+
+    let encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+    let inspected = inspect(&encoded).unwrap();
+
+    assert_eq!(
+        inspected.color_metadata.icc_profile.as_deref(),
+        Some(icc::display_p3())
+    );
+    assert_eq!(inspected.color_metadata.gamut, Some(ColorGamut::DisplayP3));
+    assert_eq!(inspected.color_metadata.transfer, Some(ColorTransfer::Srgb));
+}
+
+#[test]
+fn high_level_gain_map_encode_requires_explicit_icc_for_non_display_p3_primary() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 75,
+            progressive: false,
+        }),
+        ..EncodeOptions::default()
+    };
+
+    let error = UltraJpegEncoder::new(options)
+        .encode(&sample_bt709_primary())
+        .unwrap_err();
+
+    assert!(error.to_string().contains("require an ICC profile"));
+}
+
+#[test]
+fn compute_gain_map_defaults_to_single_channel() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(computed.image.format, PixelFormat::Gray8);
+    assert_eq!(computed.image.width, 1);
+    assert_eq!(computed.image.height, 1);
+    assert_eq!(computed.metadata.gamma, [1.0; 3]);
+}
+
+#[test]
+fn compute_gain_map_multichannel_requires_explicit_opt_in() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions {
+            channels: GainMapChannels::Multi,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(computed.image.format, PixelFormat::Rgb8);
+    assert_eq!(computed.image.width, 1);
+    assert_eq!(computed.image.height, 1);
+    assert_eq!(computed.image.data.len(), 3);
+}
+
+#[test]
+fn computed_gain_map_composes_with_structured_encode() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions::default(),
+    )
+    .unwrap();
+    let options = EncodeOptions {
+        gain_map: Some(computed.into_encode_options(83, false)),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+
+    let encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+    let decoded = decode(&encoded).unwrap();
+
+    assert!(decoded.gain_map.is_some());
+    assert_eq!(decoded.gain_map.as_ref().unwrap().gain_map.channels, 1);
+}
+
+#[test]
+fn decode_uses_xmp_metadata_when_iso_is_absent() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+    let mut encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+
+    replace_once(
+        &mut encoded,
+        b"urn:iso:std:iso:ts:21496:-1\0",
+        b"urn:xso:std:iso:ts:21496:-1\0",
+    );
+
+    let decoded = decode(&encoded).unwrap();
+    let ultra_hdr = decoded.ultra_hdr.as_ref().unwrap();
+
+    assert!(ultra_hdr.xmp.is_some());
+    assert!(ultra_hdr.iso_21496_1.is_none());
+    assert!(
+        (ultra_hdr
+            .gain_map_metadata
+            .as_ref()
+            .unwrap()
+            .hdr_capacity_max
+            - 4.0)
+            .abs()
+            < 0.01
+    );
+}
+
+#[test]
+fn decode_uses_iso_metadata_when_xmp_is_absent() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+    let mut encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+
+    replace_once(
+        &mut encoded,
+        b"http://ns.adobe.com/xap/1.0/\0",
+        b"http://ns.adobe.com/xaq/1.0/\0",
+    );
+
+    let decoded = decode(&encoded).unwrap();
+    let ultra_hdr = decoded.ultra_hdr.as_ref().unwrap();
+
+    assert!(ultra_hdr.xmp.is_none());
+    assert!(ultra_hdr.iso_21496_1.is_some());
+    assert!(
+        (ultra_hdr
+            .gain_map_metadata
+            .as_ref()
+            .unwrap()
+            .hdr_capacity_max
+            - 4.0)
+            .abs()
+            < 0.01
+    );
+}
+
+#[test]
+fn decode_prefers_iso_metadata_over_xmp_when_both_are_present() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+    let mut encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+
+    replace_once(
+        &mut encoded,
+        b"hdrgm:HDRCapacityMax=\"2.000000\"",
+        b"hdrgm:HDRCapacityMax=\"0.000000\"",
+    );
+
+    let decoded = decode(&encoded).unwrap();
+    let metadata = decoded
+        .ultra_hdr
+        .as_ref()
+        .and_then(|ultra_hdr| ultra_hdr.gain_map_metadata.as_ref())
+        .unwrap();
+
+    assert!((metadata.hdr_capacity_max - 4.0).abs() < 0.01);
+}
+
+#[test]
+fn decode_rejects_xmp_fallback_when_base_rendition_is_hdr_true() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+    let mut encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+
+    replace_once(
+        &mut encoded,
+        b"urn:iso:std:iso:ts:21496:-1\0",
+        b"urn:xso:std:iso:ts:21496:-1\0",
+    );
+    replace_once(
+        &mut encoded,
+        b"hdrgm:BaseRenditionIsHDR=\"False\"",
+        b"hdrgm:BaseRenditionIsHDR=\"True \"",
+    );
+
+    let decoded = decode(&encoded).unwrap();
+    let ultra_hdr = decoded.ultra_hdr.as_ref().unwrap();
+
+    assert!(ultra_hdr.xmp.is_some());
+    assert!(ultra_hdr.iso_21496_1.is_none());
+    assert!(ultra_hdr.gain_map_metadata.is_none());
+}
+
+#[test]
+fn decode_rejects_xmp_fallback_when_required_fields_are_missing() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+    let mut encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+
+    replace_once(
+        &mut encoded,
+        b"urn:iso:std:iso:ts:21496:-1\0",
+        b"urn:xso:std:iso:ts:21496:-1\0",
+    );
+    replace_once(
+        &mut encoded,
+        b"hdrgm:HDRCapacityMax",
+        b"hdrgm:HDRCapacityMaz",
+    );
+
+    let decoded = decode(&encoded).unwrap();
+    let ultra_hdr = decoded.ultra_hdr.as_ref().unwrap();
+
+    assert!(ultra_hdr.xmp.is_some());
+    assert!(ultra_hdr.iso_21496_1.is_none());
+    assert!(ultra_hdr.gain_map_metadata.is_none());
+}
+
+#[test]
+fn encode_ultra_hdr_convenience_wrapper_packages_image() {
+    let encoded = encode_ultra_hdr(
+        &sample_hdr(),
+        &sample_primary(),
+        &UltraHdrEncodeOptions::default(),
+    )
+    .unwrap();
+    let inspected = inspect(&encoded).unwrap();
+
+    assert!(inspected.gain_map_jpeg_len.is_some());
+    assert_eq!(
+        inspected.color_metadata.icc_profile.as_deref(),
+        Some(icc::display_p3())
+    );
+}
+
+#[test]
+fn encode_ultra_hdr_rejects_prepopulated_primary_gain_map() {
+    let mut options = UltraHdrEncodeOptions::default();
+    options.primary.gain_map = Some(GainMapEncodeOptions {
+        image: sample_gain_map(),
+        metadata: sample_gain_map_metadata(),
+        quality: 80,
+        progressive: false,
+    });
+
+    let error = encode_ultra_hdr(&sample_hdr(), &sample_primary(), &options).unwrap_err();
+    assert!(error.to_string().contains("primary.gain_map"));
+}
+
+#[test]
+fn encodes_and_decodes_multichannel_gain_map_roundtrip() {
+    let options = EncodeOptions {
+        gain_map: Some(GainMapEncodeOptions {
+            image: sample_multichannel_gain_map(),
+            metadata: sample_multichannel_gain_map_metadata(),
+            quality: 82,
+            progressive: false,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    };
+
+    let encoded = UltraJpegEncoder::new(options)
+        .encode(&sample_primary())
+        .unwrap();
+    let decoded = decode(&encoded).unwrap();
+
+    let gain_map = decoded.gain_map.as_ref().expect("decoded gain map");
+    assert_eq!(gain_map.image.format, PixelFormat::Rgb8);
+    assert_eq!(gain_map.gain_map.channels, 3);
+    assert_eq!(gain_map.gain_map.data.len(), 4 * 4 * 3);
+
+    let metadata = decoded
+        .ultra_hdr
+        .as_ref()
+        .and_then(|ultra_hdr| ultra_hdr.gain_map_metadata.as_ref())
+        .unwrap();
+    assert_eq!(metadata.max_content_boost, [4.0, 8.0, 2.0]);
+    assert_eq!(metadata.gamma, [1.0, 1.2, 1.4]);
+
+    let hdr = decoded
+        .reconstruct_hdr(4.0, HdrOutputFormat::LinearFloat)
+        .unwrap();
+    assert_eq!(hdr.width, 4);
+    assert_eq!(hdr.height, 4);
 }
 
 #[test]
@@ -463,4 +876,18 @@ fn compat_decoder_accepts_borrowed_slice_api() {
     assert_eq!(decoded.width, 4);
     assert_eq!(decoded.height, 4);
     assert_eq!(decoded.data.len(), 4 * 4 * 4);
+}
+
+fn replace_once(bytes: &mut [u8], needle: &[u8], replacement: &[u8]) {
+    assert_eq!(
+        needle.len(),
+        replacement.len(),
+        "replacement must preserve byte length"
+    );
+
+    let offset = bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .expect("needle not found");
+    bytes[offset..offset + needle.len()].copy_from_slice(replacement);
 }
