@@ -164,6 +164,10 @@ pub struct UltraHdrMetadata {
     /// Location from which [`UltraHdrMetadata::xmp`] was resolved.
     pub xmp_location: Option<MetadataLocation>,
     /// Effective ISO 21496-1 payload used for Ultra HDR metadata parsing.
+    ///
+    /// The primary JPEG may also carry a four-byte version-only ISO APP2
+    /// block. That structural block is not treated as effective gain-map
+    /// metadata here.
     pub iso_21496_1: Option<Vec<u8>>,
     /// Location from which [`UltraHdrMetadata::iso_21496_1`] was resolved.
     pub iso_21496_1_location: Option<MetadataLocation>,

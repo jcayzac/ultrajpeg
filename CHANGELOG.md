@@ -52,6 +52,10 @@ Detailed migration guide:
 - The `progressive` flags on primary and gain-map encode settings now document
   scan mode only; compression policy is described separately through
   `CompressionEffort`.
+- Ultra HDR ISO 21496-1 handling is now interoperable with canonical Ultra HDR
+  JPEGs: encode writes the primary version-only APP2 block plus canonical
+  gain-map ISO payloads, and decode/raw parsing now accept those canonical
+  payloads while keeping compatibility with the older legacy payload layout.
 - The primary Ultra HDR container XMP now also declares the `hdrgm`
   namespace/version on its container packet, matching the expected packet shape
   without moving gain-map parameter fields out of the gain-map JPEG XMP.

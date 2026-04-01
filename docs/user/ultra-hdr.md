@@ -24,8 +24,9 @@ When `EncodeOptions::gain_map` is `Some(...)`, the crate writes:
 
 - MPF directory metadata on the primary JPEG
 - container or directory XMP on the primary JPEG
+- a version-only ISO 21496-1 APP2 block on the primary JPEG
 - `hdrgm:*` XMP on the gain-map JPEG
-- ISO 21496-1 metadata on the gain-map JPEG
+- canonical ISO 21496-1 gain-map metadata on the gain-map JPEG
 
 ### What Gets Resolved On Decode
 
@@ -46,6 +47,10 @@ Those entry points are intentionally raw:
 - they do not apply decode-time precedence
 - they do not apply the crate's defensive fallback filters
 - they are meant for explicit validation and comparison workflows
+
+`parse_iso_21496_1(...)` expects one gain-map ISO payload. The primary
+JPEG's four-byte version-only ISO APP2 block is structural only and returns an
+error if passed to that raw parser directly.
 
 ## Container Structure Inspection
 

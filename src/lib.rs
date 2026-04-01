@@ -238,7 +238,7 @@ pub fn parse_gain_map_xmp(xmp: &str) -> Result<ParsedGainMapXmp> {
     parse_gain_map_xmp_raw(xmp)
 }
 
-/// Parse a raw ISO 21496-1 payload into structured gain-map metadata.
+/// Parse a raw ISO 21496-1 gain-map payload into structured metadata.
 ///
 /// This function is intentionally raw:
 ///
@@ -246,6 +246,12 @@ pub fn parse_gain_map_xmp(xmp: &str) -> Result<ParsedGainMapXmp> {
 /// - it does not compare the result against any XMP payload
 /// - it is intended for callers that need to validate or compare raw payloads
 ///   explicitly
+/// - it accepts both the canonical Ultra HDR payload layout and the older
+///   legacy layout emitted by earlier `ultrahdr-core` releases
+///
+/// The primary JPEG in an Ultra HDR bundle may also carry a four-byte
+/// version-only ISO APP2 block. That structural block is not gain-map
+/// metadata; passing it here returns an error.
 ///
 /// In other words:
 ///
@@ -362,7 +368,7 @@ impl Encoder {
                     ChromaSubsampling::Yuv444,
                     &PrimaryMetadata::default(),
                 )?;
-                let metadata = build_ultra_hdr_metadata(&gain_map.metadata, jpeg.len());
+                let metadata = build_ultra_hdr_metadata(&gain_map.metadata, jpeg.len())?;
                 (Some(jpeg), Some(metadata))
             }
             None => (None, None),

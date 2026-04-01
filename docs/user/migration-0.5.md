@@ -387,8 +387,12 @@ metadata view after precedence and recovery rules.
 In other words:
 
 - `parse_gain_map_xmp(...)` parses one raw `hdrgm:*` XMP payload
-- `parse_iso_21496_1(...)` parses one raw ISO 21496-1 payload
+- `parse_iso_21496_1(...)` parses one raw gain-map ISO 21496-1 payload
 - `inspect(...)` and `decode(...)` expose the crate's effective metadata view
+
+Do not pass the primary JPEG's four-byte version-only ISO APP2 block to
+`parse_iso_21496_1(...)`; that block is structural only and does not carry
+gain-map parameters.
 
 If your old `0.4.0` code imported `ultrahdr-core` only to parse one of
 those raw payload forms, you can now keep that workflow inside `ultrajpeg`.

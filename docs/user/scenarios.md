@@ -73,6 +73,9 @@ let ultra_hdr = inspection.ultra_hdr.as_ref().unwrap();
 let parsed_xmp = parse_gain_map_xmp(ultra_hdr.xmp.as_deref().unwrap())?;
 let parsed_iso = parse_iso_21496_1(ultra_hdr.iso_21496_1.as_deref().unwrap())?;
 
+// `ultra_hdr.iso_21496_1` is the effective gain-map payload. Do not pass the
+// primary JPEG's four-byte version-only ISO APP2 block to `parse_iso_21496_1`.
+
 assert!(parsed_xmp.metadata.hdr_capacity_max >= 4.0);
 assert!(parsed_iso.hdr_capacity_max >= 4.0);
 # Ok::<(), Box<dyn std::error::Error>>(())

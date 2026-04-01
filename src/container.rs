@@ -145,6 +145,11 @@ fn assemble_container_impl(
 
     if let Some(ultra_hdr_metadata) = ultra_hdr_metadata {
         insert_at = insert_xmp_segment(&mut jpeg, insert_at, Some(&ultra_hdr_metadata.primary_xmp));
+        insert_at = insert_iso_segment(
+            &mut jpeg,
+            insert_at,
+            Some(ultra_hdr_metadata.primary_iso_21496_1.as_slice()),
+        );
     }
 
     if let Some(explicit_color) = encode_color_metadata(&primary_metadata.color) {

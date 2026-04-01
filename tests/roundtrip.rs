@@ -173,6 +173,16 @@ fn iso_payload(bytes: &[u8]) -> Option<Vec<u8>> {
     })
 }
 
+fn canonical_sample_gain_map_iso_payload() -> Vec<u8> {
+    vec![
+        0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00,
+        0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x20,
+        0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+        0x00, 0x40, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x10, 0x00, 0x00,
+        0x00,
+    ]
+}
+
 fn start_of_frame_marker(bytes: &[u8]) -> u8 {
     let jpeg = Jpeg::from_bytes(Bytes::copy_from_slice(bytes)).unwrap();
     jpeg.segments()
@@ -294,13 +304,19 @@ fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
     assert!(primary_xmp.contains("Item:Semantic=\"Primary\""));
     assert!(primary_xmp.contains("Item:Semantic=\"GainMap\""));
     assert!(!primary_xmp.contains("hdrgm:GainMapMax"));
-    assert!(iso_payload(codestreams[0]).is_none());
+    assert_eq!(
+        iso_payload(codestreams[0]),
+        Some(vec![0x00, 0x00, 0x00, 0x00])
+    );
 
     let gain_map_xmp = xmp_payload(codestreams[1]).unwrap();
     assert!(gain_map_xmp.contains("hdrgm:GainMapMax"));
     assert!(gain_map_xmp.contains("hdrgm:HDRCapacityMax"));
     assert!(!gain_map_xmp.contains("Item:Semantic=\"GainMap\""));
-    assert!(iso_payload(codestreams[1]).is_some());
+    assert_eq!(
+        iso_payload(codestreams[1]),
+        Some(canonical_sample_gain_map_iso_payload())
+    );
 }
 
 #[test]
@@ -478,7 +494,7 @@ fn decode_uses_xmp_metadata_when_iso_is_absent() {
     .encode(&sample_primary())
     .unwrap();
 
-    replace_once(
+    replace_all(
         &mut encoded,
         b"urn:iso:std:iso:ts:21496:-1\0",
         b"urn:xso:std:iso:ts:21496:-1\0",
@@ -561,6 +577,38 @@ fn decode_prefers_iso_metadata_over_xmp_when_both_are_present() {
 }
 
 #[test]
+fn raw_primary_iso_block_is_structural_only_but_gain_map_iso_remains_authoritative() {
+    let encoded = Encoder::new(EncodeOptions {
+        gain_map: Some(GainMapBundle {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+            compression: CompressionEffort::Balanced,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+
+    let inspected = inspect(&encoded).unwrap();
+    let ultra_hdr = inspected.ultra_hdr.as_ref().unwrap();
+
+    assert_eq!(
+        ultra_hdr.iso_21496_1_location,
+        Some(MetadataLocation::GainMap)
+    );
+    assert_eq!(
+        ultra_hdr.gain_map_metadata_source,
+        Some(GainMapMetadataSource::Iso21496_1)
+    );
+    assert_eq!(
+        ultra_hdr.iso_21496_1.as_deref(),
+        Some(canonical_sample_gain_map_iso_payload().as_slice())
+    );
+}
+
+#[test]
 fn decode_rejects_xmp_fallback_when_base_rendition_is_hdr_true() {
     let mut encoded = Encoder::new(EncodeOptions {
         gain_map: Some(GainMapBundle {
@@ -575,7 +623,7 @@ fn decode_rejects_xmp_fallback_when_base_rendition_is_hdr_true() {
     .encode(&sample_primary())
     .unwrap();
 
-    replace_once(
+    replace_all(
         &mut encoded,
         b"urn:iso:std:iso:ts:21496:-1\0",
         b"urn:xso:std:iso:ts:21496:-1\0",
@@ -607,7 +655,7 @@ fn decode_rejects_xmp_fallback_when_required_fields_are_missing() {
     .encode(&sample_primary())
     .unwrap();
 
-    replace_once(
+    replace_all(
         &mut encoded,
         b"urn:iso:std:iso:ts:21496:-1\0",
         b"urn:xso:std:iso:ts:21496:-1\0",
