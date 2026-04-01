@@ -162,6 +162,10 @@ pub struct DecodedGainMap {
     pub gain_map: GainMap,
     /// Effective parsed gain-map metadata used for HDR reconstruction, if it
     /// could be resolved.
+    ///
+    /// This is the effective metadata selected by the crate's decode-time
+    /// precedence and recovery rules, not necessarily a payload parsed only
+    /// from the secondary JPEG itself.
     pub metadata: Option<GainMapMetadata>,
     /// Raw gain-map JPEG bytes, retained only when requested via
     /// [`DecodeOptions::retain_gain_map_jpeg`].
@@ -172,6 +176,10 @@ pub struct DecodedGainMap {
 #[derive(Debug, Clone)]
 pub struct DecodedImage {
     /// Decoded primary-image pixels.
+    ///
+    /// When parsed primary-image color metadata is available, `ultrajpeg`
+    /// applies the resolved gamut and transfer to this image value rather than
+    /// leaving the decoder defaults in place.
     pub image: RawImage,
     /// Raw primary JPEG bytes, retained only when requested via
     /// [`DecodeOptions::retain_primary_jpeg`].
@@ -199,6 +207,60 @@ pub struct Inspection {
     pub primary_metadata: PrimaryMetadata,
     /// Effective Ultra HDR metadata, if present.
     pub ultra_hdr: Option<UltraHdrMetadata>,
+}
+
+/// Parsed `hdrgm:*` XMP payload.
+///
+/// This type exposes the gain-map metadata carried by a raw XMP payload and
+/// the optional bundled gain-map JPEG length signaled by the container
+/// directory.
+#[derive(Debug, Clone)]
+pub struct ParsedGainMapXmp {
+    /// Parsed gain-map metadata.
+    pub metadata: GainMapMetadata,
+    /// Gain-map JPEG length recovered from container-directory XMP, if present.
+    pub gain_map_jpeg_len: Option<usize>,
+}
+
+/// Structural classification of a JPEG container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerKind {
+    /// A single JPEG codestream with no additional embedded JPEG payloads.
+    Jpeg,
+    /// An MPF-bundled multi-image JPEG.
+    Mpf,
+    /// Multiple concatenated JPEG codestreams were found, but no MPF directory
+    /// could be parsed.
+    ConcatenatedJpegs,
+}
+
+/// Byte range of one embedded JPEG codestream inside an input buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodestreamLayout {
+    /// Byte offset of the codestream start in the original input.
+    pub offset: usize,
+    /// Byte length of the codestream.
+    pub len: usize,
+}
+
+/// Structural layout of a JPEG or multi-image JPEG container.
+///
+/// This type exposes codestream boundaries and the indices that `ultrajpeg`
+/// treats as the primary and gain-map JPEG payloads.
+///
+/// The layout is structural only. It does not imply that all embedded
+/// codestreams are semantically valid Ultra HDR payloads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerLayout {
+    /// Structural classification of the input container.
+    pub kind: ContainerKind,
+    /// Embedded JPEG codestreams in container order.
+    pub codestreams: Vec<CodestreamLayout>,
+    /// Index of the primary JPEG codestream in [`ContainerLayout::codestreams`].
+    pub primary_index: usize,
+    /// Index of the gain-map JPEG codestream in
+    /// [`ContainerLayout::codestreams`], if one was identified.
+    pub gain_map_index: Option<usize>,
 }
 
 /// Decode configuration.
@@ -270,6 +332,54 @@ pub struct ComputedGainMap {
     pub metadata: GainMapMetadata,
 }
 
+/// Options for deriving an SDR primary image from source pixels.
+///
+/// The prepared primary image is always:
+///
+/// - `Rgb8`
+/// - tagged as [`ColorTransfer::Srgb`]
+/// - tagged for the requested [`PreparePrimaryOptions::target_gamut`]
+/// - brightness-floored so the default [`crate::compute_gain_map`] path stays
+///   within the crate's default gain-map boost envelope
+///
+/// `source_peak_nits` controls how source luminance is interpreted:
+///
+/// - for PQ input, `None` defaults to `10000`
+/// - for HLG input, `None` defaults to `1000`
+/// - for linear input, `None` defaults to `1000`
+/// - for sRGB input, `None` defaults to `203`
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparePrimaryOptions {
+    /// Target gamut for the SDR primary image.
+    ///
+    /// The current high-level helper supports [`ColorGamut::Bt709`] and
+    /// [`ColorGamut::DisplayP3`].
+    pub target_gamut: ColorGamut,
+    /// Source peak luminance in nits.
+    ///
+    /// When set to `None`, `ultrajpeg` picks a transfer-specific default as
+    /// described on [`PreparePrimaryOptions`].
+    pub source_peak_nits: Option<f32>,
+    /// Target SDR peak luminance in nits.
+    pub target_peak_nits: f32,
+}
+
+/// Prepared SDR primary image and matching primary-JPEG metadata.
+///
+/// This type is produced by [`crate::prepare_sdr_primary`] for workflows where
+/// the caller manages geometry or pixel edits before computing a gain map and
+/// packaging the final JPEG.
+///
+/// [`PreparedPrimary::image`] and [`PreparedPrimary::metadata`] are intended to
+/// be used together on subsequent encode calls.
+#[derive(Debug, Clone)]
+pub struct PreparedPrimary {
+    /// Prepared SDR primary image pixels.
+    pub image: RawImage,
+    /// Primary metadata that matches [`PreparedPrimary::image`].
+    pub metadata: PrimaryMetadata,
+}
+
 /// Encode configuration for the primary image and optional bundled gain map.
 #[derive(Debug, Clone)]
 pub struct EncodeOptions {
@@ -327,6 +437,16 @@ impl Default for UltraHdrEncodeOptions {
     }
 }
 
+impl Default for PreparePrimaryOptions {
+    fn default() -> Self {
+        Self {
+            target_gamut: ColorGamut::Bt709,
+            source_peak_nits: None,
+            target_peak_nits: 203.0,
+        }
+    }
+}
+
 impl ColorMetadata {
     /// Build Display-P3 primary-image metadata using the crate's bundled ICC
     /// profile.
@@ -344,6 +464,16 @@ impl ColorMetadata {
             icc_profile: Some(crate::icc::display_p3().to_vec()),
             gamut: Some(ColorGamut::DisplayP3),
             gamut_info: Some(GamutInfo::from_standard(ColorGamut::DisplayP3)),
+            transfer: Some(ColorTransfer::Srgb),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn bt709_srgb() -> Self {
+        Self {
+            icc_profile: None,
+            gamut: Some(ColorGamut::Bt709),
+            gamut_info: Some(GamutInfo::from_standard(ColorGamut::Bt709)),
             transfer: Some(ColorTransfer::Srgb),
         }
     }
@@ -387,6 +517,23 @@ impl EncodeOptions {
                 color: ColorMetadata::display_p3(),
                 exif: None,
             },
+            ..Self::default()
+        }
+    }
+}
+
+impl PreparePrimaryOptions {
+    /// Build SDR-primary preparation defaults for Ultra HDR packaging.
+    ///
+    /// The returned options target a Display-P3 primary image with the usual
+    /// SDR reference peak of `203` nits.
+    ///
+    /// This is a high-level policy default, not a guarantee of source-image
+    /// conformance checking.
+    #[must_use]
+    pub fn ultra_hdr_defaults() -> Self {
+        Self {
+            target_gamut: ColorGamut::DisplayP3,
             ..Self::default()
         }
     }

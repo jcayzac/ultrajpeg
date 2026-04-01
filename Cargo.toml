@@ -15,6 +15,7 @@ members = [".", "xtask"]
 default-members = ["."]
 
 [dependencies]
+half = "2"
 img-parts = "0.4"
 mozjpeg-rs = "0.9"
 rayon = "1"

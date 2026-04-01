@@ -1,6 +1,8 @@
 use crate::{
     error::{Error, Result},
-    types::{ColorMetadata, GainMapMetadataSource, MetadataLocation, UltraHdrMetadata},
+    types::{
+        ColorMetadata, GainMapMetadataSource, MetadataLocation, ParsedGainMapXmp, UltraHdrMetadata,
+    },
 };
 use ultrahdr_core::{
     ColorGamut, ColorTransfer, GainMapMetadata,
@@ -61,6 +63,18 @@ pub(crate) fn parse_ultra_hdr_metadata(
         gain_map_metadata,
         gain_map_metadata_source,
     }))
+}
+
+pub(crate) fn parse_gain_map_xmp_raw(xmp: &str) -> Result<ParsedGainMapXmp> {
+    let (metadata, gain_map_jpeg_len) = parse_xmp(xmp)?;
+    Ok(ParsedGainMapXmp {
+        metadata,
+        gain_map_jpeg_len,
+    })
+}
+
+pub(crate) fn parse_iso_21496_1_raw(iso_21496_1: &[u8]) -> Result<GainMapMetadata> {
+    deserialize_iso21496(iso_21496_1).map_err(Into::into)
 }
 
 fn xmp_passes_defensive_checks(xmp: &str) -> bool {

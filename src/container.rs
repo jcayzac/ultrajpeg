@@ -6,8 +6,8 @@ use crate::{
         parse_ultra_hdr_metadata, xmp_segment_payload,
     },
     types::{
-        ColorMetadata, DecodeOptions, GamutInfo, MetadataLocation, PrimaryMetadata,
-        UltraHdrMetadata,
+        CodestreamLayout, ColorMetadata, ContainerKind, ContainerLayout, DecodeOptions, GamutInfo,
+        MetadataLocation, PrimaryMetadata, UltraHdrMetadata,
     },
 };
 use img_parts::{
@@ -60,6 +60,23 @@ pub(crate) fn inspect_container(bytes: &[u8]) -> Result<InspectedContainer> {
         xmp_location: effective_metadata.xmp_location,
         iso: effective_metadata.iso,
         iso_location: effective_metadata.iso_location,
+    })
+}
+
+pub(crate) fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
+    let (kind, codestreams) = codestream_ranges(bytes)?;
+    let gain_map_index = (codestreams.len() > 1).then_some(1);
+    Ok(ContainerLayout {
+        kind,
+        codestreams: codestreams
+            .into_iter()
+            .map(|(offset, end)| CodestreamLayout {
+                offset,
+                len: end - offset,
+            })
+            .collect(),
+        primary_index: 0,
+        gain_map_index,
     })
 }
 
@@ -158,31 +175,39 @@ fn assemble_container_impl(
 }
 
 fn primary_range(bytes: &[u8]) -> Result<(usize, usize)> {
-    if let Ok(images) = parse_mpf(bytes)
-        && let Some(range) = images.first().copied()
-    {
-        return Ok(range);
-    }
-
-    find_jpeg_boundaries(bytes)
-        .into_iter()
-        .next()
+    codestream_ranges(bytes)?
+        .1
+        .first()
+        .copied()
         .ok_or_else(|| Error::Container("could not locate a JPEG codestream".into()))
 }
 
 fn gain_map_range(bytes: &[u8]) -> Option<(usize, usize)> {
+    codestream_ranges(bytes)
+        .ok()
+        .and_then(|(_, codestreams)| codestreams.get(1).copied())
+}
+
+fn codestream_ranges(bytes: &[u8]) -> Result<(ContainerKind, Vec<(usize, usize)>)> {
     if let Ok(images) = parse_mpf(bytes)
-        && let Some(range) = images.get(1).copied()
+        && !images.is_empty()
     {
-        return Some(range);
+        return Ok((ContainerKind::Mpf, images));
     }
 
-    let boundaries = find_jpeg_boundaries(bytes);
-    if boundaries.len() > 1 {
-        return boundaries.get(1).copied();
+    let codestreams = find_jpeg_boundaries(bytes);
+    if codestreams.is_empty() {
+        return Err(Error::Container(
+            "could not locate a JPEG codestream".into(),
+        ));
     }
 
-    None
+    let kind = if codestreams.len() > 1 {
+        ContainerKind::ConcatenatedJpegs
+    } else {
+        ContainerKind::Jpeg
+    };
+    Ok((kind, codestreams))
 }
 
 struct ScannedMetadata {

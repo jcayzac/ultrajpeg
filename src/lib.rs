@@ -20,12 +20,18 @@ pub use error::{Error, Result};
 pub use types::ChromaSubsampling;
 /// An xy chromaticity coordinate.
 pub use types::Chromaticity;
+/// Structural layout of one embedded JPEG codestream.
+pub use types::CodestreamLayout;
 /// Color-related metadata attached to the primary JPEG image.
 pub use types::ColorMetadata;
 /// Options for gain-map computation from HDR and SDR inputs.
 pub use types::ComputeGainMapOptions;
 /// Result of computing an Ultra HDR gain map from HDR and SDR inputs.
 pub use types::ComputedGainMap;
+/// Structural classification of a JPEG container.
+pub use types::ContainerKind;
+/// Structural layout of a JPEG or multi-image JPEG container.
+pub use types::ContainerLayout;
 /// Decode configuration.
 pub use types::DecodeOptions;
 /// Decoded gain-map JPEG payload and associated metadata.
@@ -48,6 +54,12 @@ pub use types::GamutInfo;
 pub use types::Inspection;
 /// Location from which Ultra HDR metadata was resolved.
 pub use types::MetadataLocation;
+/// Parsed raw `hdrgm:*` XMP payload.
+pub use types::ParsedGainMapXmp;
+/// Options for deriving an SDR primary image from source pixels.
+pub use types::PreparePrimaryOptions;
+/// Prepared SDR primary image and matching primary-JPEG metadata.
+pub use types::PreparedPrimary;
 /// Primary-JPEG metadata handled by the crate.
 pub use types::PrimaryMetadata;
 /// Convenience options for one-shot Ultra HDR packaging.
@@ -71,9 +83,15 @@ pub use ultrahdr_core::RawImage as Image;
 pub use ultrahdr_core::gainmap::HdrOutputFormat;
 
 use codec::{decode_gain_map, decode_primary_image, encode_image};
-use container::{assemble_container_owned, inspect_container, parse_container};
-use gainmap::{compute_gain_map_impl, ultra_hdr_encode_options};
-use metadata::{build_ultra_hdr_metadata, parse_ultra_hdr_metadata};
+use container::{
+    assemble_container_owned, inspect_container, inspect_container_layout as inspect_layout_impl,
+    parse_container,
+};
+use gainmap::{compute_gain_map_impl, prepare_primary_impl, ultra_hdr_encode_options};
+use metadata::{
+    build_ultra_hdr_metadata, parse_gain_map_xmp_raw, parse_iso_21496_1_raw,
+    parse_ultra_hdr_metadata,
+};
 use rayon::join;
 use ultrahdr_core::{ColorGamut as CoreColorGamut, ColorTransfer as CoreColorTransfer};
 
@@ -86,6 +104,7 @@ const PARALLEL_DECODE_THRESHOLD_BYTES: usize = 256 * 1024;
 /// - decode the primary image
 /// - decode the embedded gain-map JPEG when present
 /// - retain no raw JPEG codestream bytes
+/// - apply parsed primary-image color metadata to the returned [`DecodedImage::image`]
 pub fn decode(bytes: &[u8]) -> Result<DecodedImage> {
     decode_internal(bytes, DecodeOptions::default())
 }
@@ -108,6 +127,8 @@ pub fn decode_with_options(bytes: &[u8], options: DecodeOptions) -> Result<Decod
 /// - parses primary-JPEG metadata
 /// - detects MPF-bundled gain-map JPEG payloads
 /// - resolves effective Ultra HDR metadata with provenance
+/// - may recover effective Ultra HDR metadata from the gain-map JPEG when the
+///   primary JPEG is incomplete but the bundled structure is still usable
 /// - does not decode primary or gain-map pixels
 pub fn inspect(bytes: &[u8]) -> Result<Inspection> {
     let parsed = inspect_container(bytes)?;
@@ -122,6 +143,23 @@ pub fn inspect(bytes: &[u8]) -> Result<Inspection> {
             parsed.iso_location,
         )?,
     })
+}
+
+/// Inspect JPEG codestream boundaries and bundled-container structure.
+///
+/// This function:
+///
+/// - does not decode pixels
+/// - exposes embedded JPEG codestream offsets and lengths
+/// - reports whether the container was identified as MPF or as concatenated
+///   JPEG codestreams without MPF directory metadata
+/// - identifies which codestreams `ultrajpeg` treats as the primary and
+///   gain-map JPEG payloads
+///
+/// This API is inspection-only. It does not provide generic public MPF rewrite
+/// or JPEG surgery primitives.
+pub fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
+    inspect_layout_impl(bytes)
 }
 
 /// Encode a primary JPEG, optionally bundling a gain map and Ultra HDR metadata.
@@ -152,12 +190,79 @@ pub fn encode(image: &Image, options: &EncodeOptions) -> Result<Vec<u8>> {
 ///
 /// The default configuration computes a single-channel luminance gain map
 /// unless explicitly configured for multichannel computation.
+///
+/// This function assumes the caller already chose an SDR primary image with the
+/// desired tone-mapping and color policy. Use [`prepare_sdr_primary`] when the
+/// caller needs a supported high-level path for deriving that SDR primary from
+/// HDR source pixels.
 pub fn compute_gain_map(
     hdr_image: &Image,
     primary_image: &Image,
     options: &ComputeGainMapOptions,
 ) -> Result<ComputedGainMap> {
     compute_gain_map_impl(hdr_image, primary_image, options)
+}
+
+/// Parse a raw `hdrgm:*` XMP payload into structured gain-map metadata.
+///
+/// This function is intentionally raw:
+///
+/// - it does not apply `ultrajpeg`'s decode-time precedence rules
+/// - it does not apply the crate's defensive recovery filters
+/// - it is intended for callers that need to validate or compare raw payloads
+///   explicitly
+///
+/// Container-only XMP that does not actually carry `hdrgm:*` metadata does not
+/// parse successfully here.
+pub fn parse_gain_map_xmp(xmp: &str) -> Result<ParsedGainMapXmp> {
+    parse_gain_map_xmp_raw(xmp)
+}
+
+/// Parse a raw ISO 21496-1 payload into structured gain-map metadata.
+///
+/// This function is intentionally raw:
+///
+/// - it does not apply `ultrajpeg`'s decode-time precedence rules
+/// - it does not compare the result against any XMP payload
+/// - it is intended for callers that need to validate or compare raw payloads
+///   explicitly
+pub fn parse_iso_21496_1(iso_21496_1: &[u8]) -> Result<GainMapMetadata> {
+    parse_iso_21496_1_raw(iso_21496_1)
+}
+
+/// Prepare an SDR primary image from source pixels for gain-map workflows.
+///
+/// The returned [`PreparedPrimary`] contains:
+///
+/// - an `Rgb8` primary image tagged as sRGB
+/// - matching [`PrimaryMetadata`] for the requested target gamut
+///
+/// This is the supported high-level path for callers that:
+///
+/// - transform HDR pixels first
+/// - then need an SDR primary image for [`compute_gain_map`]
+/// - and later package the result with [`encode`] or [`encode_ultra_hdr`]
+///
+/// The current helper supports:
+///
+/// - `Rgb8`
+/// - `Rgba8`
+/// - `Rgba16F`
+/// - `Rgba32F`
+/// - `Rgba1010102Pq`
+/// - `Rgba1010102Hlg`
+///
+/// The current output-gamut policy supports [`ColorGamut::Bt709`] and
+/// [`ColorGamut::DisplayP3`].
+///
+/// To keep the default [`compute_gain_map`] workflow composable, this helper
+/// also floors the derived SDR primary brightness so that the prepared image
+/// stays within the crate's default gain-map boost envelope.
+pub fn prepare_sdr_primary(
+    image: &Image,
+    options: &PreparePrimaryOptions,
+) -> Result<PreparedPrimary> {
+    prepare_primary_impl(image, options)
 }
 
 /// Convenience wrapper that computes a gain map and packages an Ultra HDR JPEG.
@@ -168,6 +273,9 @@ pub fn compute_gain_map(
 /// - primary-image color policy
 /// - EXIF policy
 /// - any SDR fallback behavior
+///
+/// Use [`prepare_sdr_primary`] when the caller wants `ultrajpeg` to derive a
+/// supported SDR primary image and matching metadata before this packaging step.
 ///
 /// `options.primary.gain_map` must be `None`; the gain map is computed from the
 /// provided HDR and primary images and then bundled into the final JPEG.
@@ -242,7 +350,9 @@ impl DecodedImage {
     /// This method requires:
     ///
     /// - a decoded gain map
-    /// - effective parsed gain-map metadata
+    /// - effective parsed gain-map metadata, taken from
+    ///   [`DecodedGainMap::metadata`] or, if that is absent,
+    ///   [`DecodedImage::ultra_hdr`]
     ///
     /// It returns:
     ///

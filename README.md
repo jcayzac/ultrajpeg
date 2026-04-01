@@ -10,7 +10,10 @@ ISO 21496-1 metadata.
 
 - plain JPEG encode and decode
 - metadata-only inspection without pixel decode
+- raw Ultra HDR payload parsing for XMP and ISO 21496-1
+- structural inspection for MPF-bundled or concatenated JPEG codestreams
 - Ultra HDR gain-map packaging and recovery
+- SDR-primary preparation for caller-managed HDR workflows
 - bundled Display-P3 ICC helper
 - structured primary-image color metadata and Ultra HDR metadata
 - synchronous API with internal parallel decode where useful

@@ -582,6 +582,7 @@ name = "ultrajpeg"
 version = "0.5.0-rc1"
 dependencies = [
  "criterion",
+ "half",
  "img-parts",
  "mozjpeg-rs",
  "rayon",

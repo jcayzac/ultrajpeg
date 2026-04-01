@@ -25,9 +25,13 @@ root.
 Functions:
 
 - `inspect`
+- `inspect_container_layout`
 - `decode`
 - `decode_with_options`
 - `encode`
+- `parse_gain_map_xmp`
+- `parse_iso_21496_1`
+- `prepare_sdr_primary`
 - `compute_gain_map`
 - `encode_ultra_hdr`
 
@@ -46,6 +50,10 @@ Root types:
 - `Chromaticity`
 - `GamutInfo`
 - `ColorMetadata`
+- `ParsedGainMapXmp`
+- `ContainerKind`
+- `CodestreamLayout`
+- `ContainerLayout`
 - `PrimaryMetadata`
 - `UltraHdrMetadata`
 - `MetadataLocation`
@@ -56,6 +64,8 @@ Root types:
 - `DecodeOptions`
 - `GainMapChannels`
 - `ComputeGainMapOptions`
+- `PreparePrimaryOptions`
+- `PreparedPrimary`
 - `ComputedGainMap`
 - `GainMapBundle`
 - `EncodeOptions`
@@ -68,6 +78,21 @@ Public module:
 
 Everything else is intended to remain private implementation detail unless a
 clear public use case requires exposure.
+
+## Additional Public Contracts
+
+The issue-`#4` additions follow the same stable API rules rather than opening a
+second low-level surface.
+
+- `parse_gain_map_xmp(...)` and `parse_iso_21496_1(...)` are intentionally raw.
+  They must not silently apply the crate's decode-time precedence or defensive
+  recovery rules.
+- `inspect_container_layout(...)` is structural inspection only. It should
+  expose codestream boundaries and primary/gain-map indices without becoming a
+  generic JPEG surgery API by accident.
+- `prepare_sdr_primary(...)` is the supported high-level bridge for
+  caller-managed HDR workflows. It must return matching pixels and
+  `PrimaryMetadata`, and the two should continue to be treated as a pair.
 
 ## Naming Rules
 
@@ -118,6 +143,12 @@ The split between `PrimaryMetadata` and `UltraHdrMetadata` is intentional.
 
 Do not move EXIF back into `ColorMetadata`.
 
+Raw payload parsing is intentionally separate from `UltraHdrMetadata` recovery:
+
+- `UltraHdrMetadata` remains the crate's effective decoded view
+- the raw parse helpers remain the escape hatch for explicit validation or
+  comparison workflows
+
 ## Color Model Rules
 
 `ColorMetadata` has both:
@@ -133,6 +164,10 @@ signaling or ICC-backed classification when possible.
 The crate may add richer color helpers later, but it should not collapse
 structured gamut information back down to an enum-only model.
 
+`prepare_sdr_primary(...)` is the current high-level color-policy helper. Any
+future color helpers should remain consistent with it instead of inventing a
+parallel convenience story.
+
 ## Ultra HDR Recovery Rules
 
 Current behavior is intentionally pragmatic:
@@ -147,6 +182,9 @@ This recovery behavior is user-visible. Changes here need:
 - explicit tests
 - changelog notes
 - migration notes when externally observable
+
+Do not make the raw metadata parsers mirror these recovery rules. They exist so
+callers can inspect inconsistent raw payloads directly.
 
 ## Encoding Rules
 
@@ -164,12 +202,29 @@ Primary ICC behavior is also part of the contract:
   Display-P3 plus sRGB with no explicit ICC, inject the bundled Display-P3 ICC
 - otherwise fail rather than guessing
 
+`prepare_sdr_primary(...)` inherits those rules by returning matching
+`PrimaryMetadata`. For Display-P3 output it should continue to return bundled
+Display-P3 ICC metadata automatically.
+
 ## Documentation Rules
 
 The crate now builds with `#![deny(missing_docs)]`.
 
 That enforcement is necessary but not sufficient. Maintainers should treat
 documentation updates as part of any public-API change.
+
+In particular, rustdoc on the public item itself must explicitly call out any
+non-obvious user-visible behavior, including:
+
+- fallback and precedence rules
+- automatic metadata injection
+- retained-buffer or borrowing behavior
+- structural recovery of malformed-but-usable inputs
+- implicit clamping, flooring, or normalization
+- parallelism or work-avoidance behavior when it affects expectations
+
+Do not leave those details only in changelog entries, tests, implementation
+comments, or maintainer-only docs.
 
 When changing the public API:
 
