@@ -12,6 +12,7 @@ mod error;
 mod gainmap;
 pub mod icc;
 mod metadata;
+mod reconstruct;
 mod types;
 
 /// Public error type for codec, container, and metadata failures.
@@ -189,7 +190,7 @@ pub fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
 ///
 /// - if [`EncodeOptions::primary_metadata`] already includes an ICC profile, it is embedded as-is
 /// - if no ICC profile is present and the resolved primary gamut and transfer are Display-P3 plus sRGB, the bundled Display-P3 ICC profile is embedded automatically
-/// - otherwise gain-map packaging fails with [`Error::InvalidInput`]
+/// - otherwise gain-map packaging preserves the caller-provided absence of an ICC profile
 pub fn encode(image: &Image, options: &EncodeOptions) -> Result<Vec<u8>> {
     Encoder::new(options.clone()).encode(image)
 }
@@ -286,6 +287,9 @@ pub fn parse_iso_21496_1(iso_21496_1: &[u8]) -> Result<GainMapMetadata> {
 ///
 /// The current output-gamut policy supports [`ColorGamut::Bt709`] and
 /// [`ColorGamut::DisplayP3`].
+///
+/// Any explicit peak-nit values supplied through [`PreparePrimaryOptions`] must
+/// be finite and positive.
 ///
 /// To keep the default [`compute_gain_map`] workflow composable, this helper
 /// also floors the derived SDR primary brightness so that the prepared image
@@ -397,7 +401,14 @@ impl DecodedImage {
     ///
     /// - [`Error::MissingGainMap`] if no gain map was decoded
     /// - [`Error::MissingGainMapMetadata`] if no effective gain-map metadata is available
+    /// - [`Error::InvalidInput`] if `display_boost` is non-finite or non-positive
+    /// - [`Error::InvalidInput`] if the effective gain-map metadata contains
+    ///   non-finite or structurally invalid numeric values
     /// - or a metadata or codec error if HDR reconstruction fails
+    ///
+    /// For common decoded JPEG input formats, `ultrajpeg` may use an internal
+    /// optimized reconstruction path that preserves the public API contract and
+    /// output semantics.
     pub fn reconstruct_hdr(
         &self,
         display_boost: f32,
@@ -483,9 +494,7 @@ fn resolved_primary_metadata(
         return Ok(resolved);
     }
 
-    Err(Error::InvalidInput(
-        "gain-map JPEG primary images require an ICC profile; for Display-P3/sRGB input use EncodeOptions::ultra_hdr_defaults() or provide an explicit ICC profile".into(),
-    ))
+    Ok(primary_metadata.clone())
 }
 
 fn named_gamut(color_metadata: &ColorMetadata) -> Option<ColorGamut> {

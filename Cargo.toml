@@ -1,6 +1,6 @@
 [package]
 name = "ultrajpeg"
-version = "0.5.0-rc5"
+version = "0.5.0-rc6"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "JPEG encoder/decoder with mozjpeg support and Ultra HDR Image Format v1.1 support."
@@ -15,8 +15,10 @@ members = [".", "xtask"]
 default-members = ["."]
 
 [dependencies]
+archmage = "0.8.9"
 half = "2"
 img-parts = "0.4"
+magetypes = "0.8.9"
 mozjpeg-rs = "0.9"
 rayon = "1"
 thiserror = "2"

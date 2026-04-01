@@ -153,6 +153,41 @@ fn ultrahdr_fixture_reconstructs_hdr_output() {
 }
 
 #[test]
+fn retained_ultrahdr_codestreams_decode_without_panicking() {
+    let decoded = decode_with_options(
+        SAMPLE_ULTRAHDR,
+        DecodeOptions {
+            retain_primary_jpeg: true,
+            retain_gain_map_jpeg: true,
+            ..DecodeOptions::default()
+        },
+    )
+    .unwrap();
+
+    let primary = decoded.primary_jpeg.as_ref().unwrap();
+    let gain_map = decoded
+        .gain_map
+        .as_ref()
+        .unwrap()
+        .jpeg_bytes
+        .as_ref()
+        .unwrap();
+
+    let decoded_primary = std::panic::catch_unwind(|| decode(primary));
+    let decoded_gain_map = std::panic::catch_unwind(|| decode(gain_map));
+
+    let decoded_primary = decoded_primary
+        .expect("primary codestream decode panicked")
+        .unwrap();
+    let decoded_gain_map = decoded_gain_map
+        .expect("gain-map codestream decode panicked")
+        .unwrap();
+
+    assert!(decoded_primary.gain_map.is_none());
+    assert!(decoded_gain_map.gain_map.is_none());
+}
+
+#[test]
 fn inspect_matches_decoded_primary_metadata_for_fixture() {
     let inspected = inspect(SAMPLE_ULTRAHDR).unwrap();
     let decoded = decode(SAMPLE_ULTRAHDR).unwrap();

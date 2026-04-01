@@ -49,7 +49,7 @@ pub(crate) fn inspect_container(bytes: &[u8]) -> Result<InspectedContainer> {
     let primary_range = primary_range(bytes)?;
     let primary_jpeg = &bytes[primary_range.0..primary_range.1];
     let scanned = scan_primary_metadata(primary_jpeg)?;
-    let gain_map_range = gain_map_range(bytes);
+    let gain_map_range = validated_gain_map_range(bytes, gain_map_range(bytes));
     let effective_metadata = effective_ultra_hdr_sources(bytes, &scanned, gain_map_range)?;
 
     Ok(InspectedContainer {
@@ -87,7 +87,7 @@ pub(crate) fn parse_container<'a>(
     let primary_range = primary_range(bytes)?;
     let primary_jpeg = &bytes[primary_range.0..primary_range.1];
     let scanned = scan_primary_metadata(primary_jpeg)?;
-    let gain_map_range = gain_map_range(bytes);
+    let gain_map_range = validated_gain_map_range(bytes, gain_map_range(bytes));
     let effective_metadata = effective_ultra_hdr_sources(bytes, &scanned, gain_map_range)?;
 
     let gain_map_jpeg = if options.decode_gain_map {
@@ -194,6 +194,13 @@ fn gain_map_range(bytes: &[u8]) -> Option<(usize, usize)> {
     codestream_ranges(bytes)
         .ok()
         .and_then(|(_, codestreams)| codestreams.get(1).copied())
+}
+
+fn validated_gain_map_range(
+    bytes: &[u8],
+    gain_map_range: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    gain_map_range.filter(|(start, end)| *start < *end && *end <= bytes.len())
 }
 
 fn codestream_ranges(bytes: &[u8]) -> Result<(ContainerKind, Vec<(usize, usize)>)> {

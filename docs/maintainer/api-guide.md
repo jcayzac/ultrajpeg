@@ -168,6 +168,34 @@ structured gamut information back down to an enum-only model.
 future color helpers should remain consistent with it instead of inventing a
 parallel convenience story.
 
+## Numeric Robustness Rules
+
+Public numeric inputs that drive HDR or SDR math are part of the supported
+contract and must be validated explicitly.
+
+- `prepare_sdr_primary(...)` must reject non-finite peak values.
+- peak or boost values must be finite and positive, not silently normalized
+  from `NaN`, `inf`, or negative inputs.
+- `DecodedImage::reconstruct_hdr(...)` must validate the effective gain-map
+  metadata before applying logarithmic or multiplicative math.
+- non-finite or structurally invalid reconstruction metadata is caller error
+  and should fail with `Error::InvalidInput`.
+
+Output handling follows a different rule:
+
+- bounded integer output paths may sanitize non-finite intermediates before
+  packing bytes
+- those saturation semantics must stay consistent across scalar and SIMD paths
+- linear-float HDR outputs should not be clamped merely to hide invalid math
+
+SIMD policy follows from that:
+
+- one-shot API validation remains scalar
+- hot per-pixel paths should keep robustness checks SIMD-friendly when
+  practical
+- do not add scalar-only hot-loop validation if the same behavior can be
+  expressed with masks and blends without changing semantics
+
 ## Ultra HDR Recovery Rules
 
 Current behavior is intentionally pragmatic:
@@ -218,6 +246,8 @@ non-obvious user-visible behavior, including:
 
 - fallback and precedence rules
 - automatic metadata injection
+- validation rules for numeric inputs
+- sanitization behavior when packing bounded integer outputs
 - retained-buffer or borrowing behavior
 - structural recovery of malformed-but-usable inputs
 - implicit clamping, flooring, or normalization
@@ -233,6 +263,28 @@ When changing the public API:
 3. Update `CHANGELOG.md`.
 4. Update `docs/user/migration-0.5.md` or its successor when migration impact exists.
 5. Update this guide if the stable maintenance rules changed.
+
+## Benchmark Policy
+
+The repository contains two benchmark tiers:
+
+- the default benchmark suite, which must stay reasonable for normal local use
+  and for bench-target smoke coverage under `cargo test --all-targets`
+- large real-fixture benchmarks, which are for manual optimization work only
+
+Large real-fixture benchmarks must not be part of CI or git-hook default
+execution.
+
+The current opt-in switch is:
+
+- `ULTRAJPEG_BENCH_REAL_FIXTURES=1`
+
+In particular, the large `reconstruct_hdr` fixture cases in
+`benches/typical.rs` are only enabled when that environment variable is set.
+
+Use that mode only when explicitly investigating performance on real large
+inputs. When doing so, save a Criterion baseline first so comparisons stay
+meaningful.
 
 ## Versioning Guidance Before 1.0
 

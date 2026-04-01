@@ -702,7 +702,8 @@ pub fn decode_with_options(bytes: &[u8], options: DecodeOptions) -> Result<Decod
 /// - if no ICC profile is present and the resolved primary gamut/transfer is
 ///   Display-P3 + sRGB, the built-in Display-P3 profile is embedded
 ///   automatically,
-/// - otherwise gain-map packaging fails with [`Error::InvalidInput`].
+/// - otherwise gain-map packaging preserves the caller-provided absence of an
+///   ICC profile.
 ///
 /// This behavior is intended to keep compliant Display-P3 Ultra HDR packaging
 /// easy without hiding the rule from the caller.

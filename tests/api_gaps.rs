@@ -1,8 +1,8 @@
-use ultrahdr_core::{ColorGamut, ColorTransfer, PixelFormat};
+use ultrahdr_core::{ColorGamut, ColorTransfer, PixelFormat, gainmap::HdrOutputFormat};
 use ultrajpeg::{
     CompressionEffort, ContainerKind, DecodeOptions, EncodeOptions, MetadataLocation,
-    PreparePrimaryOptions, compute_gain_map, inspect, inspect_container_layout, parse_gain_map_xmp,
-    parse_iso_21496_1, prepare_sdr_primary,
+    PreparePrimaryOptions, compute_gain_map, decode, inspect, inspect_container_layout,
+    parse_gain_map_xmp, parse_iso_21496_1, prepare_sdr_primary,
 };
 
 const PLAIN_SDR: &[u8] = include_bytes!("fixtures/plain-sdr.jpg");
@@ -156,6 +156,66 @@ fn prepare_sdr_primary_rejects_bt2100_output() {
     .unwrap_err();
 
     assert!(error.to_string().contains("Bt709 and DisplayP3"));
+}
+
+#[test]
+fn prepare_sdr_primary_rejects_non_finite_peaks() {
+    let target_peak_error = prepare_sdr_primary(
+        &sample_hdr(),
+        &PreparePrimaryOptions {
+            target_peak_nits: f32::NAN,
+            ..PreparePrimaryOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(
+        target_peak_error
+            .to_string()
+            .contains("finite and positive")
+    );
+
+    let source_peak_error = prepare_sdr_primary(
+        &sample_hdr(),
+        &PreparePrimaryOptions {
+            source_peak_nits: Some(f32::INFINITY),
+            ..PreparePrimaryOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(
+        source_peak_error
+            .to_string()
+            .contains("finite and positive")
+    );
+}
+
+#[test]
+fn reconstruct_hdr_rejects_non_finite_display_boost() {
+    let decoded = decode(SAMPLE_ULTRAHDR).unwrap();
+    let error = decoded
+        .reconstruct_hdr(f32::NAN, HdrOutputFormat::LinearFloat)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("display_boost"));
+}
+
+#[test]
+fn reconstruct_hdr_rejects_invalid_effective_metadata() {
+    let mut decoded = decode(SAMPLE_ULTRAHDR).unwrap();
+    decoded
+        .gain_map
+        .as_mut()
+        .unwrap()
+        .metadata
+        .as_mut()
+        .unwrap()
+        .max_content_boost[0] = 0.0;
+
+    let error = decoded
+        .reconstruct_hdr(4.0, HdrOutputFormat::LinearFloat)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("max_content_boost[0]"));
 }
 
 fn decode_with_retained_gain_map(bytes: &[u8]) -> ultrajpeg::DecodedImage {

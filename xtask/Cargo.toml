@@ -5,3 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+ultrahdr-core = "0.2"
+ultrajpeg = { path = ".." }

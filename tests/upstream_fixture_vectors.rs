@@ -3,8 +3,7 @@ use ultrajpeg::{
     DecodeOptions, GainMapMetadataSource, MetadataLocation, decode, decode_with_options, inspect,
 };
 
-const UPSTREAM_ULTRAHDR: &[u8] =
-    include_bytes!("fixtures/upstream/ultra-hdr-samples/Ultra_HDR_Samples_Originals_05.jpg");
+const UPSTREAM_ULTRAHDR: &[u8] = include_bytes!("fixtures/upstream/hdr-jpeg-mishaal/original.jpg");
 
 #[test]
 fn upstream_ultrahdr_fixture_inspects_expected_metadata() {

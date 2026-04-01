@@ -1,7 +1,6 @@
-use crate::{Error, Result};
+use crate::{Error, Result, reconstruct::reconstruct_hdr_image};
 use ultrahdr_core::{
-    ColorGamut, ColorTransfer, GainMap, GainMapMetadata, RawImage, Unstoppable,
-    gainmap::{HdrOutputFormat, apply_gainmap},
+    ColorGamut, ColorTransfer, GainMap, GainMapMetadata, RawImage, gainmap::HdrOutputFormat,
 };
 
 /// Chroma subsampling modes exposed by the public API.
@@ -191,6 +190,11 @@ pub struct DecodedGainMap {
     /// This is the effective metadata selected by the crate's decode-time
     /// precedence and recovery rules, not necessarily a payload parsed only
     /// from the secondary JPEG itself.
+    ///
+    /// [`DecodedImage::reconstruct_hdr`](crate::DecodedImage::reconstruct_hdr)
+    /// validates the effective metadata before use. If a caller mutates this
+    /// value into a non-finite or structurally invalid state, reconstruction
+    /// returns [`crate::Error::InvalidInput`].
     pub metadata: Option<GainMapMetadata>,
     /// Raw gain-map JPEG bytes, retained only when requested via
     /// [`DecodeOptions::retain_gain_map_jpeg`].
@@ -412,11 +416,15 @@ pub struct PreparePrimaryOptions {
     ///
     /// This affects the tone-mapping policy used by
     /// [`crate::prepare_sdr_primary`].
+    ///
+    /// When set explicitly, the value must be finite and positive.
     pub source_peak_nits: Option<f32>,
     /// Target SDR peak luminance in nits.
     ///
     /// The default `203` nits matches the crate's current SDR preparation
     /// policy for Ultra HDR workflows.
+    ///
+    /// The value must be finite and positive.
     pub target_peak_nits: f32,
 }
 
@@ -724,14 +732,12 @@ impl DecodedImage {
             })
             .ok_or(Error::MissingGainMapMetadata)?;
 
-        apply_gainmap(
+        reconstruct_hdr_image(
             &self.image,
             &gain_map.gain_map,
             metadata,
             display_boost,
             output_format,
-            Unstoppable,
         )
-        .map_err(Into::into)
     }
 }

@@ -31,6 +31,16 @@ Detailed migration guide:
 - The `0.5.0` line began with the main stable native API refactor and then
   gained additional additive APIs before the full `0.5.0` shape described
   here.
+- `prepare_sdr_primary(...)` now rejects non-finite peak-luminance inputs:
+  `PreparePrimaryOptions::target_peak_nits` must be finite and positive, and
+  `PreparePrimaryOptions::source_peak_nits`, when set explicitly, must also be
+  finite and positive.
+- `DecodedImage::reconstruct_hdr(...)` now rejects non-finite or non-positive
+  `display_boost` values and rejects effective gain-map metadata that is
+  non-finite or structurally invalid.
+- Bounded-output reconstruction and SDR-primary quantization paths now sanitize
+  non-finite intermediates explicitly before packing bytes, with consistent
+  saturation semantics across scalar and SIMD hot paths.
 - Removed the wrapper-era compatibility API from the public crate surface.
 - Simplified the root API around one native surface with `Image`, `encode`,
   `Encoder`, `decode`, `DecodedImage`, `inspect`, and `Inspection`.
@@ -88,6 +98,10 @@ Detailed migration guide:
 - If you relied on the old compatibility API, either stay on `0.4.0` for
   now or port to the native root API; the compatibility surface is no longer
   public in `0.5.0`.
+- If you were previously passing `NaN`, `inf`, or otherwise invalid numeric
+  values into `prepare_sdr_primary(...)` or `reconstruct_hdr(...)`, those calls
+  now fail with `Error::InvalidInput` instead of flowing through the math
+  pipeline.
 - If you currently depend directly on `ultrahdr-core` only for raw `hdrgm:*`
   XMP parsing, raw ISO 21496-1 parsing, or bundled codestream-boundary
   inspection, prefer the new `0.5.0` root APIs instead.

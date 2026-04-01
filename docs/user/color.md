@@ -44,7 +44,8 @@ When packaging a gain map:
   embedded as-is
 - if no ICC profile is set and the resolved primary image is Display-P3 plus
   sRGB, `ultrajpeg` injects the bundled Display-P3 ICC profile automatically
-- otherwise gain-map packaging fails with `Error::InvalidInput`
+- otherwise gain-map packaging preserves the caller-provided absence of an ICC
+  profile
 
 The crate does not synthesize arbitrary ICC profiles.
 

@@ -393,6 +393,54 @@ fn decode_options_control_gain_map_and_codestream_retention() {
 }
 
 #[test]
+fn retained_codestreams_decode_as_plain_jpegs() {
+    let encoded = Encoder::new(EncodeOptions {
+        gain_map: Some(GainMapBundle {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 75,
+            progressive: false,
+            compression: CompressionEffort::Balanced,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+
+    let retained = decode_with_options(
+        &encoded,
+        DecodeOptions {
+            retain_primary_jpeg: true,
+            retain_gain_map_jpeg: true,
+            ..DecodeOptions::default()
+        },
+    )
+    .unwrap();
+
+    let primary_jpeg = retained.primary_jpeg.as_ref().unwrap();
+    let gain_map_jpeg = retained
+        .gain_map
+        .as_ref()
+        .unwrap()
+        .jpeg_bytes
+        .as_ref()
+        .unwrap();
+
+    let decoded_primary = std::panic::catch_unwind(|| decode(primary_jpeg));
+    let decoded_gain_map = std::panic::catch_unwind(|| decode(gain_map_jpeg));
+
+    let decoded_primary = decoded_primary
+        .expect("primary codestream decode panicked")
+        .unwrap();
+    let decoded_gain_map = decoded_gain_map
+        .expect("gain-map codestream decode panicked")
+        .unwrap();
+
+    assert!(decoded_primary.gain_map.is_none());
+    assert!(decoded_gain_map.gain_map.is_none());
+}
+
+#[test]
 fn gain_map_packaging_auto_injects_display_p3_icc_for_display_p3_primary() {
     let encoded = Encoder::new(EncodeOptions {
         gain_map: Some(GainMapBundle {
@@ -423,8 +471,8 @@ fn gain_map_packaging_auto_injects_display_p3_icc_for_display_p3_primary() {
 }
 
 #[test]
-fn gain_map_packaging_requires_explicit_icc_for_non_display_p3_primary() {
-    let error = Encoder::new(EncodeOptions {
+fn gain_map_packaging_allows_missing_icc_for_non_display_p3_primary() {
+    let encoded = Encoder::new(EncodeOptions {
         gain_map: Some(GainMapBundle {
             image: sample_gain_map(),
             metadata: sample_gain_map_metadata(),
@@ -435,9 +483,10 @@ fn gain_map_packaging_requires_explicit_icc_for_non_display_p3_primary() {
         ..EncodeOptions::default()
     })
     .encode(&sample_bt709_primary())
-    .unwrap_err();
+    .unwrap();
+    let inspected = inspect(&encoded).unwrap();
 
-    assert!(error.to_string().contains("require an ICC profile"));
+    assert!(inspected.primary_metadata.color.icc_profile.is_none());
 }
 
 #[test]
