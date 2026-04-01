@@ -393,14 +393,16 @@ fn partial_fixture_html(
             )?;
             comparison_section_html(
                 report_dir,
-                "Gain Map JPEG",
-                "Original extracted gain-map codestream and plain-JPEG re-encode of the decoded gain-map image. Full HDR re-assembly remains unavailable for this fixture.",
-                &gain_original_path,
-                &gain_reencoded_path,
-                &gain_diff_path,
-                original_gain_bytes.len(),
-                gain_reencoded.len(),
-                &gain_metrics,
+                ComparisonSection {
+                    title: "Gain Map JPEG",
+                    note: "Original extracted gain-map codestream and plain-JPEG re-encode of the decoded gain-map image. Full HDR re-assembly remains unavailable for this fixture.",
+                    original_path: &gain_original_path,
+                    reencoded_path: &gain_reencoded_path,
+                    diff_path: &gain_diff_path,
+                    original_size: original_gain_bytes.len(),
+                    reencoded_size: gain_reencoded.len(),
+                    metrics: &gain_metrics,
+                },
             )
         } else {
             "<h3>Gain Map JPEG</h3><p>Original gain-map codestream was not retained.</p>"
@@ -430,14 +432,16 @@ fn partial_fixture_html(
         ),
         comparison_section_html(
             report_dir,
-            "Primary JPEG",
-            "Original extracted primary codestream and plain-JPEG re-encode of the decoded primary image.",
-            &primary_original_path,
-            &primary_reencoded_path,
-            &primary_diff_path,
-            original_primary_bytes.len(),
-            primary_reencoded.len(),
-            &primary_metrics,
+            ComparisonSection {
+                title: "Primary JPEG",
+                note: "Original extracted primary codestream and plain-JPEG re-encode of the decoded primary image.",
+                original_path: &primary_original_path,
+                reencoded_path: &primary_reencoded_path,
+                diff_path: &primary_diff_path,
+                original_size: original_primary_bytes.len(),
+                reencoded_size: primary_reencoded.len(),
+                metrics: &primary_metrics,
+            },
         ),
         gain_map_html,
     ))
@@ -553,14 +557,16 @@ fn analyze_fixture(
             write_rgb_png(assets_dir, slug, "gain-map-diff", &metrics.diff_preview)?;
         let html = comparison_section_html(
             report_dir,
-            "Gain Map JPEG",
-            "Decoded gain-map JPEG pixels.",
-            &gain_original_path,
-            &gain_reencoded_path,
-            &gain_diff_path,
-            original_gain_bytes.len(),
-            reencoded_gain_bytes.len(),
-            &metrics,
+            ComparisonSection {
+                title: "Gain Map JPEG",
+                note: "Decoded gain-map JPEG pixels.",
+                original_path: &gain_original_path,
+                reencoded_path: &gain_reencoded_path,
+                diff_path: &gain_diff_path,
+                original_size: original_gain_bytes.len(),
+                reencoded_size: reencoded_gain_bytes.len(),
+                metrics: &metrics,
+            },
         );
         (Some(metrics.without_diff_preview()), html)
     } else {
@@ -613,25 +619,29 @@ fn analyze_fixture(
         fast_path_detail_html,
         comparison_section_html(
             report_dir,
-            "Assembled JPEG",
-            assembled_note,
-            &assembled_original_path,
-            &assembled_reencoded_path,
-            &assembled_diff_path,
-            bytes.len(),
-            reencoded.len(),
-            &assembled_metrics,
+            ComparisonSection {
+                title: "Assembled JPEG",
+                note: assembled_note,
+                original_path: &assembled_original_path,
+                reencoded_path: &assembled_reencoded_path,
+                diff_path: &assembled_diff_path,
+                original_size: bytes.len(),
+                reencoded_size: reencoded.len(),
+                metrics: &assembled_metrics,
+            },
         ),
         comparison_section_html(
             report_dir,
-            "Primary JPEG",
-            "The raw primary codestream extracted from each assembled file.",
-            &primary_original_path,
-            &primary_reencoded_path,
-            &primary_diff_path,
-            original_primary_bytes.len(),
-            reencoded_primary_bytes.len(),
-            &primary_metrics,
+            ComparisonSection {
+                title: "Primary JPEG",
+                note: "The raw primary codestream extracted from each assembled file.",
+                original_path: &primary_original_path,
+                reencoded_path: &primary_reencoded_path,
+                diff_path: &primary_diff_path,
+                original_size: original_primary_bytes.len(),
+                reencoded_size: reencoded_primary_bytes.len(),
+                metrics: &primary_metrics,
+            },
         ),
         gain_map_html,
         if decoded.gain_map.is_some() {
@@ -668,17 +678,18 @@ fn decode_for_report(bytes: &[u8]) -> Result<DecodedImage, Box<dyn Error>> {
     )?)
 }
 
-fn comparison_section_html(
-    report_dir: &Path,
-    title: &str,
-    note: &str,
-    original_path: &Path,
-    reencoded_path: &Path,
-    diff_path: &Path,
+struct ComparisonSection<'a> {
+    title: &'a str,
+    note: &'a str,
+    original_path: &'a Path,
+    reencoded_path: &'a Path,
+    diff_path: &'a Path,
     original_size: usize,
     reencoded_size: usize,
-    metrics: &ImageMetrics,
-) -> String {
+    metrics: &'a ImageMetrics,
+}
+
+fn comparison_section_html(report_dir: &Path, section: ComparisonSection<'_>) -> String {
     format!(
         "<h3>{}</h3><p>{}</p>{}\
          <table><tbody>\
@@ -690,18 +701,18 @@ fn comparison_section_html(
          <figure><img src=\"{}\" alt=\"re-encoded {}\"><figcaption>Re-encoded</figcaption></figure>\
          <figure><img src=\"{}\" alt=\"{} diff map\"><figcaption>Normalized diff map</figcaption></figure>\
          </div>",
-        escape_html(title),
-        escape_html(note),
-        metric_table_html(title, metrics),
-        original_size,
-        reencoded_size,
-        format_size_delta(reencoded_size as i64 - original_size as i64),
-        path_for_html(report_dir, original_path),
-        escape_html(title),
-        path_for_html(report_dir, reencoded_path),
-        escape_html(title),
-        path_for_html(report_dir, diff_path),
-        escape_html(title),
+        escape_html(section.title),
+        escape_html(section.note),
+        metric_table_html(section.title, section.metrics),
+        section.original_size,
+        section.reencoded_size,
+        format_size_delta(section.reencoded_size as i64 - section.original_size as i64),
+        path_for_html(report_dir, section.original_path),
+        escape_html(section.title),
+        path_for_html(report_dir, section.reencoded_path),
+        escape_html(section.title),
+        path_for_html(report_dir, section.diff_path),
+        escape_html(section.title),
     )
 }
 
