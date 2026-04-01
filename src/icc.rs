@@ -15,6 +15,9 @@ use ultrahdr_core::ColorGamut;
 /// This is the ICC registry `DisplayP3.icc` payload shipped with the crate so
 /// callers can embed a standards-friendly Display-P3 profile without carrying a
 /// separate asset in their application.
+///
+/// This function only returns raw profile bytes. It does not by itself attach
+/// the profile to JPEG output or update any other color metadata fields.
 #[must_use]
 pub fn display_p3() -> &'static [u8] {
     include_bytes!("../assets/icc/DisplayP3.icc")

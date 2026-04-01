@@ -270,12 +270,18 @@ pub struct ContainerLayout {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeOptions {
     /// Whether to decode the embedded gain-map JPEG when present.
+    ///
+    /// This only affects gain-map pixel decode. Ultra HDR metadata inspection
+    /// and recovery still run.
     pub decode_gain_map: bool,
     /// Whether to retain the primary JPEG codestream in
     /// [`DecodedImage::primary_jpeg`].
     pub retain_primary_jpeg: bool,
     /// Whether to retain the gain-map JPEG codestream in
     /// [`DecodedGainMap::jpeg_bytes`].
+    ///
+    /// This takes effect only when [`DecodeOptions::decode_gain_map`] is `true`
+    /// and a gain-map JPEG was decoded successfully.
     pub retain_gain_map_jpeg: bool,
 }
 
@@ -375,8 +381,13 @@ pub struct PreparePrimaryOptions {
 #[derive(Debug, Clone)]
 pub struct PreparedPrimary {
     /// Prepared SDR primary image pixels.
+    ///
+    /// The image is always `Rgb8` with [`ColorTransfer::Srgb`].
     pub image: RawImage,
     /// Primary metadata that matches [`PreparedPrimary::image`].
+    ///
+    /// For Display-P3 output this includes the crate's bundled Display-P3 ICC
+    /// profile. For BT.709 output, no ICC profile is attached automatically.
     pub metadata: PrimaryMetadata,
 }
 

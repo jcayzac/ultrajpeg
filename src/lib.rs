@@ -116,6 +116,10 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedImage> {
 /// - skip gain-map decode
 /// - retain the primary JPEG codestream
 /// - retain the gain-map JPEG codestream
+///
+/// Even when gain-map pixel decode is disabled, this function still inspects
+/// bundled metadata and may return [`DecodedImage::ultra_hdr`] when effective
+/// Ultra HDR metadata could be resolved.
 pub fn decode_with_options(bytes: &[u8], options: DecodeOptions) -> Result<DecodedImage> {
     decode_internal(bytes, options)
 }
@@ -158,6 +162,10 @@ pub fn inspect(bytes: &[u8]) -> Result<Inspection> {
 ///
 /// This API is inspection-only. It does not provide generic public MPF rewrite
 /// or JPEG surgery primitives.
+///
+/// For non-MPF multi-JPEG inputs, `ultrajpeg` treats the second codestream as
+/// the gain-map candidate structurally; semantic validity is determined
+/// separately by metadata parsing on decode or inspect.
 pub fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
     inspect_layout_impl(bytes)
 }
