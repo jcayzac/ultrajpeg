@@ -289,6 +289,8 @@ fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
     assert_eq!(codestreams.len(), 2);
 
     let primary_xmp = xmp_payload(codestreams[0]).unwrap();
+    assert!(primary_xmp.contains("xmlns:hdrgm="));
+    assert!(primary_xmp.contains("hdrgm:Version=\"1.0\""));
     assert!(primary_xmp.contains("Item:Semantic=\"Primary\""));
     assert!(primary_xmp.contains("Item:Semantic=\"GainMap\""));
     assert!(!primary_xmp.contains("hdrgm:GainMapMax"));

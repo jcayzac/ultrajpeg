@@ -52,6 +52,9 @@ Detailed migration guide:
 - The `progressive` flags on primary and gain-map encode settings now document
   scan mode only; compression policy is described separately through
   `CompressionEffort`.
+- The primary Ultra HDR container XMP now also declares the `hdrgm`
+  namespace/version on its container packet, matching the expected packet shape
+  without moving gain-map parameter fields out of the gain-map JPEG XMP.
 - The `0.5.0` API surface now closes the main post-refactor gaps that still
   forced direct `ultrahdr-core` usage for some consumers:
   raw Ultra HDR payload parsing, structural bundled-container inspection, and

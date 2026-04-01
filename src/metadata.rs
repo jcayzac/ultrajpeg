@@ -199,7 +199,9 @@ fn generate_container_xmp(gain_map_length: usize) -> String {
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
     <rdf:Description rdf:about=""
         xmlns:Container="{CONTAINER_NAMESPACE}"
-        xmlns:Item="{ITEM_NAMESPACE}">
+        xmlns:Item="{ITEM_NAMESPACE}"
+        xmlns:hdrgm="{HDRGM_NAMESPACE}"
+        hdrgm:Version="1.0">
       <Container:Directory>
         <rdf:Seq>
           <rdf:li rdf:parseType="Resource">
