@@ -25,6 +25,8 @@ The biggest changes are:
 - EXIF moved out of `ColorMetadata` into `PrimaryMetadata`
 - `decode(...)` no longer retains raw JPEG codestream bytes by default
 - `ComputedGainMap::into_encode_options(...)` became `into_bundle(...)`
+- primary and gain-map encode settings now include an explicit
+  `CompressionEffort`
 - raw Ultra HDR payload parsing is now available directly from `ultrajpeg`
 - structural bundled-container inspection is now available directly from
   `ultrajpeg`
@@ -170,6 +172,7 @@ gain_map: Some(GainMapBundle {
     metadata,
     quality,
     progressive,
+    compression: CompressionEffort::Balanced,
 })
 ```
 
@@ -190,10 +193,19 @@ New:
 ```text
 let computed = ultrajpeg::compute_gain_map(&hdr, &primary, &Default::default())?;
 let options = EncodeOptions {
-    gain_map: Some(computed.into_bundle(90, false)),
+    gain_map: Some(computed.into_bundle(90, false, CompressionEffort::Balanced)),
     ..EncodeOptions::ultra_hdr_defaults()
 };
 ```
+
+To preserve the previous default encode behavior explicitly, set:
+
+```text
+compression: CompressionEffort::Balanced
+```
+
+Use `CompressionEffort::Smallest` when you want the most size-oriented
+configuration available for the chosen scan mode.
 
 ## Decode Migration
 
@@ -344,7 +356,11 @@ inherits the new `EncodeOptions` structure.
 That means:
 
 - `options.primary.primary_metadata` now holds the primary JPEG metadata
+- `options.primary.progressive` and `options.primary.compression` control the
+  primary JPEG scan mode and compression effort
 - `options.primary.gain_map` must still remain `None`
+- `options.gain_map_progressive` and `options.gain_map_compression` control the
+  computed secondary gain-map JPEG scan mode and compression effort
 
 ## New Additive APIs After The Main Refactor
 
@@ -477,7 +493,8 @@ For most users, the target surface should now be:
 4. Replace `GainMapEncodeOptions` with `GainMapBundle`.
 5. Replace `UltraJpegEncoder::new(...).encode(...)` with either
    `Encoder::new(...).encode(...)` or `encode(...)`.
-6. Replace `ComputedGainMap::into_encode_options(...)` with `into_bundle(...)`.
+6. Replace `ComputedGainMap::into_encode_options(...)` with `into_bundle(...)`
+   and pass an explicit `CompressionEffort`.
 7. Audit all decode call sites that relied on retained codestream bytes and add
    `DecodeOptions` retention flags explicitly.
 8. Update any `gamut_info()` method calls to field access.

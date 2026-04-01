@@ -57,6 +57,7 @@ pub(crate) fn ultra_hdr_encode_options(
             metadata: computed.metadata,
             quality: options.gain_map_quality,
             progressive: options.gain_map_progressive,
+            compression: options.gain_map_compression,
         }),
         ..primary.clone()
     }

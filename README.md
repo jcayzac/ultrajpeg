@@ -9,6 +9,7 @@ ISO 21496-1 metadata.
 ## Highlights
 
 - plain JPEG encode and decode
+- explicit JPEG scan-mode and compression-effort control on encode
 - metadata-only inspection without pixel decode
 - raw Ultra HDR payload parsing for XMP and ISO 21496-1
 - structural inspection for MPF-bundled or concatenated JPEG codestreams
@@ -33,6 +34,7 @@ The primary public types include:
 
 - `Image`
 - `EncodeOptions`
+- `CompressionEffort`
 - `PrimaryMetadata`
 - `GainMapBundle`
 - `DecodedImage`

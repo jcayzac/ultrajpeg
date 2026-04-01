@@ -3,8 +3,8 @@ use std::{sync::LazyLock, time::Duration};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ultrahdr_core::{ColorGamut, ColorTransfer, GainMapMetadata, PixelFormat, RawImage};
 use ultrajpeg::{
-    DecodeOptions, EncodeOptions, GainMapBundle, compute_gain_map, decode, decode_with_options,
-    encode_ultra_hdr, inspect,
+    CompressionEffort, DecodeOptions, EncodeOptions, GainMapBundle, compute_gain_map, decode,
+    decode_with_options, encode_ultra_hdr, inspect,
 };
 
 const PLAIN_SDR: &[u8] = include_bytes!("../tests/fixtures/plain-sdr.jpg");
@@ -62,6 +62,7 @@ fn fixture_benches(c: &mut Criterion) {
                 metadata: gain_map_metadata.clone(),
                 quality: 80,
                 progressive: false,
+                compression: CompressionEffort::Balanced,
             }),
             ..EncodeOptions::ultra_hdr_defaults()
         };
@@ -142,6 +143,7 @@ fn build_large_corpus() -> BenchmarkCorpus {
                 metadata: gain_map_metadata,
                 quality: 80,
                 progressive: false,
+                compression: CompressionEffort::Balanced,
             }),
             ..EncodeOptions::ultra_hdr_defaults()
         },

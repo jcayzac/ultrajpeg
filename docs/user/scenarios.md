@@ -83,7 +83,8 @@ assert!(parsed_iso.hdr_capacity_max >= 4.0);
 ```rust
 # use ultrahdr_core::GainMapMetadata;
 # use ultrajpeg::{
-#     ColorGamut, ColorTransfer, EncodeOptions, GainMapBundle, Image, PixelFormat,
+#     ColorGamut, ColorTransfer, CompressionEffort, EncodeOptions, GainMapBundle, Image,
+#     PixelFormat,
 # };
 let primary = Image::from_data(
     2,
@@ -113,6 +114,7 @@ let jpeg = ultrajpeg::encode(
             metadata: GainMapMetadata::new(),
             quality: 85,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     },
@@ -125,8 +127,8 @@ let jpeg = ultrajpeg::encode(
 
 ```rust
 # use ultrajpeg::{
-#     ColorGamut, ColorTransfer, ComputeGainMapOptions, EncodeOptions, Image,
-#     PixelFormat,
+#     ColorGamut, ColorTransfer, CompressionEffort, ComputeGainMapOptions, EncodeOptions,
+#     Image, PixelFormat,
 # };
 let hdr = Image::from_data(
     1,
@@ -152,7 +154,7 @@ let computed = ultrajpeg::compute_gain_map(&hdr, &primary, &ComputeGainMapOption
 let jpeg = ultrajpeg::encode(
     &primary,
     &EncodeOptions {
-        gain_map: Some(computed.into_bundle(90, false)),
+        gain_map: Some(computed.into_bundle(90, false, CompressionEffort::Balanced)),
         ..EncodeOptions::ultra_hdr_defaults()
     },
 )?;
@@ -164,7 +166,7 @@ let jpeg = ultrajpeg::encode(
 
 ```rust
 # use ultrajpeg::{
-#     ColorGamut, ColorTransfer, EncodeOptions, Image, PixelFormat,
+#     ColorGamut, ColorTransfer, CompressionEffort, EncodeOptions, Image, PixelFormat,
 #     PreparePrimaryOptions, compute_gain_map, prepare_sdr_primary,
 # };
 let hdr = Image::from_data(
@@ -185,7 +187,7 @@ let jpeg = ultrajpeg::encode(
     &prepared.image,
     &EncodeOptions {
         primary_metadata: prepared.metadata.clone(),
-        gain_map: Some(computed.into_bundle(90, false)),
+        gain_map: Some(computed.into_bundle(90, false, CompressionEffort::Balanced)),
         ..EncodeOptions::default()
     },
 )?;
@@ -251,6 +253,10 @@ let jpeg = encode_ultra_hdr(&hdr, &primary, &UltraHdrEncodeOptions::default())?;
 # let _ = jpeg;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+For both `EncodeOptions` and `UltraHdrEncodeOptions`, the `progressive` flags
+select scan mode only. Use the matching `CompressionEffort` field when you
+want to choose between balanced and size-oriented encoding.
 
 ### Decode And Reconstruct HDR Output
 

@@ -1,5 +1,5 @@
 use ultrahdr_core::{GainMapMetadata, PixelFormat, RawImage};
-use ultrajpeg::{EncodeOptions, Encoder, GainMapBundle};
+use ultrajpeg::{CompressionEffort, EncodeOptions, Encoder, GainMapBundle};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let primary = RawImage::new(8, 8, PixelFormat::Rgb8)?;
@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             metadata: GainMapMetadata::new(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::default()
     };

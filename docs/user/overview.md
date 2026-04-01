@@ -38,6 +38,8 @@ Use:
   or gain-map JPEG codestream bytes
 - `encode(...)` when you already have the primary image and optional gain-map
   payload you want to package
+  choose scan mode with `progressive` and size-vs-time policy with
+  `CompressionEffort`
 - `parse_gain_map_xmp(...)` or `parse_iso_21496_1(...)` when you need to
   validate or compare raw Ultra HDR metadata payloads yourself
 - `prepare_sdr_primary(...)` when you manage HDR pixel transforms yourself and
@@ -93,6 +95,7 @@ The main public API lives at the crate root:
   - `PreparedPrimary`
   - `ComputedGainMap`
   - `GainMapBundle`
+  - `CompressionEffort`
   - `EncodeOptions`
   - `UltraHdrEncodeOptions`
   - `Encoder`

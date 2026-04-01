@@ -490,7 +490,27 @@ impl ComputedGainMap {
     /// The gain-map JPEG is always encoded as a secondary JPEG payload inside
     /// the final container.
     #[must_use]
-    pub fn into_bundle(self, quality: u8, progressive: bool) -> GainMapBundle;
+    pub fn into_bundle(
+        self,
+        quality: u8,
+        progressive: bool,
+        compression: CompressionEffort,
+    ) -> GainMapBundle;
+}
+
+/// JPEG compression effort.
+///
+/// This is orthogonal to whether the JPEG is sequential or progressive.
+///
+/// With the current backend, the additional size-oriented scan optimization
+/// only affects progressive output. Sequential output still accepts
+/// `Smallest` for API consistency, but currently uses the same effective
+/// backend settings as `Balanced`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompressionEffort {
+    #[default]
+    Balanced,
+    Smallest,
 }
 
 /// Gain-map JPEG payload and metadata to bundle into the final output.
@@ -507,6 +527,9 @@ pub struct GainMapBundle {
 
     /// Whether to emit the secondary gain-map JPEG as progressive.
     pub progressive: bool,
+
+    /// Compression effort for the secondary gain-map codestream.
+    pub compression: CompressionEffort,
 }
 
 /// Encode configuration for the primary JPEG and optional bundled gain map.
@@ -517,6 +540,9 @@ pub struct EncodeOptions {
 
     /// Whether to emit the primary JPEG as progressive.
     pub progressive: bool,
+
+    /// Compression effort for the primary image.
+    pub compression: CompressionEffort,
 
     /// Chroma subsampling used for the primary image.
     pub chroma_subsampling: ChromaSubsampling,
@@ -535,6 +561,7 @@ impl Default for EncodeOptions {
         Self {
             quality: 90,
             progressive: true,
+            compression: CompressionEffort::Balanced,
             chroma_subsampling: ChromaSubsampling::Yuv420,
             primary_metadata: PrimaryMetadata::default(),
             gain_map: None,
@@ -577,6 +604,9 @@ pub struct UltraHdrEncodeOptions {
 
     /// Whether to emit the computed secondary gain-map JPEG as progressive.
     pub gain_map_progressive: bool,
+
+    /// Compression effort for the computed secondary gain-map JPEG.
+    pub gain_map_compression: CompressionEffort,
 }
 
 impl Default for UltraHdrEncodeOptions {
@@ -586,6 +616,7 @@ impl Default for UltraHdrEncodeOptions {
             gain_map: ComputeGainMapOptions::default(),
             gain_map_quality: 90,
             gain_map_progressive: false,
+            gain_map_compression: CompressionEffort::Balanced,
         }
     }
 }

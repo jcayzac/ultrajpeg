@@ -46,6 +46,12 @@ Detailed migration guide:
   default; retained codestreams are now explicit through `DecodeOptions`.
 - `ComputedGainMap::into_encode_options(...)` was replaced by
   `ComputedGainMap::into_bundle(...)`.
+- Primary and gain-map encode settings now carry an explicit
+  `CompressionEffort`, so callers can request balanced or size-oriented
+  encoding without changing the scan-mode flag.
+- The `progressive` flags on primary and gain-map encode settings now document
+  scan mode only; compression policy is described separately through
+  `CompressionEffort`.
 - The `0.5.0` API surface now closes the main post-refactor gaps that still
   forced direct `ultrahdr-core` usage for some consumers:
   raw Ultra HDR payload parsing, structural bundled-container inspection, and
@@ -60,6 +66,11 @@ Detailed migration guide:
   API-shaping release before `1.0`.
 - Port native callers to `Image`, `PrimaryMetadata`, `DecodedImage`,
   `Inspection`, `GainMapBundle`, and `Encoder`.
+- When preserving earlier encode behavior explicitly, set
+  `compression: CompressionEffort::Balanced` on primary and gain-map encode
+  options.
+- `CompressionEffort::Smallest` is accepted for both scan modes, but with the
+  current backend its extra size-oriented path only affects progressive JPEGs.
 - If you relied on default retained codestream bytes from `decode(...)`, switch
   to `decode_with_options(...)` and enable the relevant retention flags
   explicitly.

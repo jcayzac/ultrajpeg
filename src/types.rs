@@ -18,6 +18,27 @@ pub enum ChromaSubsampling {
     Yuv440,
 }
 
+/// JPEG compression effort.
+///
+/// This setting is orthogonal to whether the JPEG is encoded as sequential or
+/// progressive.
+///
+/// `Smallest` requests the most size-oriented encoder configuration available
+/// for the chosen scan mode.
+///
+/// With the current mozjpeg-based backend, the additional size-oriented scan
+/// optimization only affects progressive output. Sequential output still
+/// accepts `Smallest` for API consistency, but currently uses the same
+/// effective backend settings as `Balanced`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompressionEffort {
+    /// Balanced size and encode time.
+    #[default]
+    Balanced,
+    /// Favor smaller output over encode time.
+    Smallest,
+}
+
 /// An xy chromaticity coordinate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Chromaticity {
@@ -312,7 +333,16 @@ pub struct GainMapBundle {
     /// JPEG quality for the secondary gain-map codestream.
     pub quality: u8,
     /// Whether to emit the secondary gain-map JPEG as progressive.
+    ///
+    /// This controls scan mode only. Use [`GainMapBundle::compression`] for
+    /// the size-vs-time policy.
     pub progressive: bool,
+    /// Compression effort for the secondary gain-map codestream.
+    ///
+    /// For sequential output, [`CompressionEffort::Smallest`] is currently a
+    /// best-effort request that maps to the same effective backend settings as
+    /// [`CompressionEffort::Balanced`].
+    pub compression: CompressionEffort,
 }
 
 /// Gain-map channel layout for computed Ultra HDR metadata.
@@ -416,7 +446,16 @@ pub struct EncodeOptions {
     /// JPEG quality for the primary image.
     pub quality: u8,
     /// Whether to emit the primary JPEG as progressive.
+    ///
+    /// This controls scan mode only. Use [`EncodeOptions::compression`] for
+    /// the size-vs-time policy.
     pub progressive: bool,
+    /// Compression effort for the primary image.
+    ///
+    /// For sequential output, [`CompressionEffort::Smallest`] is currently a
+    /// best-effort request that maps to the same effective backend settings as
+    /// [`CompressionEffort::Balanced`].
+    pub compression: CompressionEffort,
     /// Chroma subsampling for the primary image.
     pub chroma_subsampling: ChromaSubsampling,
     /// Primary-JPEG metadata to embed in the output.
@@ -441,7 +480,17 @@ pub struct UltraHdrEncodeOptions {
     /// JPEG quality for the computed secondary gain-map codestream.
     pub gain_map_quality: u8,
     /// Whether to emit the computed secondary gain-map JPEG as progressive.
+    ///
+    /// This controls scan mode only. Use
+    /// [`UltraHdrEncodeOptions::gain_map_compression`] for the size-vs-time
+    /// policy.
     pub gain_map_progressive: bool,
+    /// Compression effort for the computed secondary gain-map JPEG.
+    ///
+    /// For sequential output, [`CompressionEffort::Smallest`] is currently a
+    /// best-effort request that maps to the same effective backend settings as
+    /// [`CompressionEffort::Balanced`].
+    pub gain_map_compression: CompressionEffort,
 }
 
 impl Default for EncodeOptions {
@@ -449,6 +498,7 @@ impl Default for EncodeOptions {
         Self {
             quality: 90,
             progressive: true,
+            compression: CompressionEffort::Balanced,
             chroma_subsampling: ChromaSubsampling::Yuv420,
             primary_metadata: PrimaryMetadata::default(),
             gain_map: None,
@@ -463,6 +513,7 @@ impl Default for UltraHdrEncodeOptions {
             gain_map: ComputeGainMapOptions::default(),
             gain_map_quality: 90,
             gain_map_progressive: false,
+            gain_map_compression: CompressionEffort::Balanced,
         }
     }
 }
@@ -526,7 +577,7 @@ impl EncodeOptions {
     ///
     /// ```rust
     /// # use ultrahdr_core::{GainMapMetadata, PixelFormat, RawImage};
-    /// # use ultrajpeg::{EncodeOptions, GainMapBundle};
+    /// # use ultrajpeg::{CompressionEffort, EncodeOptions, GainMapBundle};
     /// let gain_map = RawImage::new(8, 8, PixelFormat::Gray8)?;
     /// let options = EncodeOptions {
     ///     gain_map: Some(GainMapBundle {
@@ -534,6 +585,7 @@ impl EncodeOptions {
     ///         metadata: GainMapMetadata::new(),
     ///         quality: 85,
     ///         progressive: false,
+    ///         compression: CompressionEffort::Balanced,
     ///     }),
     ///     ..EncodeOptions::ultra_hdr_defaults()
     /// };
@@ -579,13 +631,22 @@ impl ComputedGainMap {
     ///
     /// The gain-map JPEG is always encoded as a secondary JPEG payload inside
     /// the final container.
+    ///
+    /// `progressive` selects the scan mode. `compression` selects the
+    /// size-vs-time policy for that scan mode.
     #[must_use]
-    pub fn into_bundle(self, quality: u8, progressive: bool) -> GainMapBundle {
+    pub fn into_bundle(
+        self,
+        quality: u8,
+        progressive: bool,
+        compression: CompressionEffort,
+    ) -> GainMapBundle {
         GainMapBundle {
             image: self.image,
             metadata: self.metadata,
             quality,
             progressive,
+            compression,
         }
     }
 }

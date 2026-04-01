@@ -803,12 +803,13 @@ let computed = ultrajpeg::compute_gain_map(&hdr, &primary, &Default::default())?
 let bytes = ultrajpeg::encode(
     &primary,
     &EncodeOptions {
-        color_metadata: chosen_color_metadata,
-        gain_map: Some(GainMapEncodeOptions {
+        primary_metadata: chosen_primary_metadata,
+        gain_map: Some(GainMapBundle {
             image: computed.image,
             metadata: computed.metadata,
             quality: 90,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::default()
     },
@@ -831,6 +832,7 @@ pub struct UltraHdrEncodeOptions {
     pub gain_map: ComputeGainMapOptions,
     pub gain_map_quality: u8,
     pub gain_map_progressive: bool,
+    pub gain_map_compression: CompressionEffort,
 }
 
 pub fn encode_ultra_hdr(

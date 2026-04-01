@@ -1,6 +1,6 @@
 use crate::{
     error::{Error, Result},
-    types::{ChromaSubsampling, DecodedGainMap, PrimaryMetadata},
+    types::{ChromaSubsampling, CompressionEffort, DecodedGainMap, PrimaryMetadata},
 };
 use mozjpeg_rs::{Encoder, Preset, Subsampling};
 use ultrahdr_core::{ColorGamut, ColorTransfer, GainMap, GainMapMetadata, PixelFormat, RawImage};
@@ -20,16 +20,11 @@ pub(crate) fn encode_image(
     image: &RawImage,
     quality: u8,
     progressive: bool,
+    compression: CompressionEffort,
     chroma_subsampling: ChromaSubsampling,
     primary_metadata: &PrimaryMetadata,
 ) -> Result<Vec<u8>> {
-    let preset = if progressive {
-        Preset::ProgressiveBalanced
-    } else {
-        Preset::BaselineBalanced
-    };
-
-    let mut encoder = Encoder::new(preset)
+    let mut encoder = make_encoder(progressive, compression)
         .quality(quality)
         .progressive(progressive)
         .subsampling(match image.format {
@@ -54,6 +49,20 @@ pub(crate) fn encode_image(
         _ => Err(mozjpeg_rs::Error::UnsupportedColorSpace),
     }
     .map_err(Into::into)
+}
+
+fn make_encoder(progressive: bool, compression: CompressionEffort) -> Encoder {
+    match (progressive, compression) {
+        (false, CompressionEffort::Balanced) => Encoder::new(Preset::BaselineBalanced),
+        // mozjpeg's extra scan optimization only affects progressive output
+        // today, but we still accept this state explicitly so the public API
+        // can model effort independently from scan mode.
+        (false, CompressionEffort::Smallest) => {
+            Encoder::new(Preset::BaselineBalanced).optimize_scans(true)
+        }
+        (true, CompressionEffort::Balanced) => Encoder::new(Preset::ProgressiveBalanced),
+        (true, CompressionEffort::Smallest) => Encoder::new(Preset::ProgressiveSmallest),
+    }
 }
 
 pub(crate) fn decode_primary_image(bytes: &[u8]) -> Result<RawImage> {

@@ -1,8 +1,8 @@
 use ultrahdr_core::{ColorGamut, ColorTransfer, PixelFormat};
 use ultrajpeg::{
-    ContainerKind, DecodeOptions, EncodeOptions, MetadataLocation, PreparePrimaryOptions,
-    compute_gain_map, inspect, inspect_container_layout, parse_gain_map_xmp, parse_iso_21496_1,
-    prepare_sdr_primary,
+    CompressionEffort, ContainerKind, DecodeOptions, EncodeOptions, MetadataLocation,
+    PreparePrimaryOptions, compute_gain_map, inspect, inspect_container_layout, parse_gain_map_xmp,
+    parse_iso_21496_1, prepare_sdr_primary,
 };
 
 const PLAIN_SDR: &[u8] = include_bytes!("fixtures/plain-sdr.jpg");
@@ -133,7 +133,7 @@ fn prepared_primary_composes_with_gain_map_and_encode_workflows() {
         &prepared.image,
         &EncodeOptions {
             primary_metadata: prepared.metadata.clone(),
-            gain_map: Some(computed.into_bundle(90, false)),
+            gain_map: Some(computed.into_bundle(90, false, CompressionEffort::Balanced)),
             ..EncodeOptions::default()
         },
     )

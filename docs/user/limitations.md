@@ -26,5 +26,9 @@ Current limitations:
   public generic MPF rewrite API
 - the crate re-encodes JPEG pixel data on encode; it is not a marker-only
   remuxer for arbitrary already-encoded primary and gain-map codestream pairs
+- `CompressionEffort::Smallest` currently provides an extra size-oriented
+  backend path only for progressive JPEGs; sequential JPEGs still accept it for
+  API consistency, but currently use the same effective backend settings as
+  `CompressionEffort::Balanced`
 - ICC parsing is currently used to recover structured gamut information, not to
   expose a full public ICC inspection API

@@ -24,6 +24,8 @@ pub use types::Chromaticity;
 pub use types::CodestreamLayout;
 /// Color-related metadata attached to the primary JPEG image.
 pub use types::ColorMetadata;
+/// JPEG compression effort used during encoding.
+pub use types::CompressionEffort;
 /// Options for gain-map computation from HDR and SDR inputs.
 pub use types::ComputeGainMapOptions;
 /// Result of computing an Ultra HDR gain map from HDR and SDR inputs.
@@ -344,6 +346,7 @@ impl Encoder {
             image,
             self.options.quality,
             self.options.progressive,
+            self.options.compression,
             self.options.chroma_subsampling,
             &primary_metadata,
         )?;
@@ -355,6 +358,7 @@ impl Encoder {
                     &gain_map.image,
                     gain_map.quality,
                     gain_map.progressive,
+                    gain_map.compression,
                     ChromaSubsampling::Yuv444,
                     &PrimaryMetadata::default(),
                 )?;

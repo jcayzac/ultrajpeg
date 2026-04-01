@@ -7,8 +7,8 @@ use ultrahdr_core::{
     metadata::find_jpeg_boundaries,
 };
 use ultrajpeg::{
-    ColorMetadata, ComputeGainMapOptions, DecodeOptions, EncodeOptions, Encoder, GainMapBundle,
-    GainMapChannels, GainMapMetadataSource, MetadataLocation, PrimaryMetadata,
+    ColorMetadata, CompressionEffort, ComputeGainMapOptions, DecodeOptions, EncodeOptions, Encoder,
+    GainMapBundle, GainMapChannels, GainMapMetadataSource, MetadataLocation, PrimaryMetadata,
     UltraHdrEncodeOptions, compute_gain_map, decode, decode_with_options, encode_ultra_hdr, icc,
     inspect,
 };
@@ -173,17 +173,30 @@ fn iso_payload(bytes: &[u8]) -> Option<Vec<u8>> {
     })
 }
 
+fn start_of_frame_marker(bytes: &[u8]) -> u8 {
+    let jpeg = Jpeg::from_bytes(Bytes::copy_from_slice(bytes)).unwrap();
+    jpeg.segments()
+        .iter()
+        .find_map(|segment| match segment.marker() {
+            markers::SOF0 | markers::SOF2 => Some(segment.marker()),
+            _ => None,
+        })
+        .unwrap()
+}
+
 #[test]
 fn encodes_and_decodes_ultrahdr_roundtrip() {
     let options = EncodeOptions {
         quality: 87,
         progressive: true,
+        compression: CompressionEffort::Balanced,
         primary_metadata: sample_primary_metadata(),
         gain_map: Some(GainMapBundle {
             image: sample_gain_map(),
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::default()
     };
@@ -265,6 +278,7 @@ fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     };
@@ -308,6 +322,7 @@ fn decode_options_control_gain_map_and_codestream_retention() {
             metadata: sample_gain_map_metadata(),
             quality: 75,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -354,6 +369,7 @@ fn gain_map_packaging_auto_injects_display_p3_icc_for_display_p3_primary() {
             metadata: sample_gain_map_metadata(),
             quality: 75,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::default()
     })
@@ -383,6 +399,7 @@ fn gain_map_packaging_requires_explicit_icc_for_non_display_p3_primary() {
             metadata: sample_gain_map_metadata(),
             quality: 75,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::default()
     })
@@ -433,7 +450,7 @@ fn computed_gain_map_into_bundle_composes_with_encode() {
     )
     .unwrap();
     let options = EncodeOptions {
-        gain_map: Some(computed.into_bundle(83, false)),
+        gain_map: Some(computed.into_bundle(83, false, CompressionEffort::Balanced)),
         ..EncodeOptions::ultra_hdr_defaults()
     };
 
@@ -452,6 +469,7 @@ fn decode_uses_xmp_metadata_when_iso_is_absent() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -483,6 +501,7 @@ fn decode_uses_iso_metadata_when_xmp_is_absent() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -517,6 +536,7 @@ fn decode_prefers_iso_metadata_over_xmp_when_both_are_present() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -546,6 +566,7 @@ fn decode_rejects_xmp_fallback_when_base_rendition_is_hdr_true() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -577,6 +598,7 @@ fn decode_rejects_xmp_fallback_when_required_fields_are_missing() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -625,6 +647,7 @@ fn encode_ultra_hdr_rejects_prepopulated_primary_gain_map() {
         metadata: sample_gain_map_metadata(),
         quality: 80,
         progressive: false,
+        compression: CompressionEffort::Balanced,
     });
 
     let error = encode_ultra_hdr(&sample_hdr(), &sample_primary(), &options).unwrap_err();
@@ -639,6 +662,7 @@ fn encodes_and_decodes_multichannel_gain_map_roundtrip() {
             metadata: sample_multichannel_gain_map_metadata(),
             quality: 82,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -679,6 +703,7 @@ fn display_p3_helpers_embed_the_built_in_profile() {
             metadata: sample_gain_map_metadata(),
             quality: 80,
             progressive: false,
+            compression: CompressionEffort::Balanced,
         }),
         ..EncodeOptions::ultra_hdr_defaults()
     })
@@ -707,6 +732,7 @@ fn ultra_hdr_defaults_preserve_regular_jpeg_defaults() {
 
     assert_eq!(options.quality, EncodeOptions::default().quality);
     assert_eq!(options.progressive, EncodeOptions::default().progressive);
+    assert_eq!(options.compression, EncodeOptions::default().compression);
     assert_eq!(
         options.chroma_subsampling,
         EncodeOptions::default().chroma_subsampling
@@ -716,6 +742,27 @@ fn ultra_hdr_defaults_preserve_regular_jpeg_defaults() {
         Some(icc::display_p3())
     );
     assert!(options.gain_map.is_none());
+}
+
+#[test]
+fn smallest_effort_keeps_the_requested_scan_mode() {
+    let sequential = Encoder::new(EncodeOptions {
+        progressive: false,
+        compression: CompressionEffort::Smallest,
+        ..EncodeOptions::default()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+    assert_eq!(start_of_frame_marker(&sequential), markers::SOF0);
+
+    let progressive = Encoder::new(EncodeOptions {
+        progressive: true,
+        compression: CompressionEffort::Smallest,
+        ..EncodeOptions::default()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+    assert_eq!(start_of_frame_marker(&progressive), markers::SOF2);
 }
 
 fn replace_once(bytes: &mut [u8], needle: &[u8], replacement: &[u8]) {
