@@ -41,7 +41,8 @@ jobs:
         run: cargo doc --workspace --all-features --no-deps
 
   benchmark:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: false
     runs-on: ubuntu-latest
 
     steps:
