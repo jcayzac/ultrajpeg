@@ -1,5 +1,17 @@
 # Ultrajpeg Implementation Plan
 
+## Status
+
+The stable native API refactor described in this plan was implemented for
+`0.5.0`.
+
+This document is retained as historical planning context. For current
+maintainer-facing guidance, see:
+
+- `docs/maintainer/api-guide.md`
+- `docs/maintainer/stable-api-contract.md`
+- `docs/user/migration-0.5.md`
+
 ## Goal
 
 Build a public Rust crate named `ultrajpeg` that can encode and decode JPEG-based HDR images with gain maps, color signaling, ICC profiles, and UltraHDR-related metadata, without depending on AGPL-licensed components.
@@ -14,6 +26,7 @@ The public crate must support all of the following:
 - Decode embedded gain map information from JPEG container metadata and associated JPEG payloads.
 - Decode color signaling information, including ICC profiles.
 - Decode XMP and ISO 21496-1 metadata relevant to HDR / gain-map workflows.
+- Decode Apple Gain Map metadata when present in older Apple-authored JPEG HDR files.
 - Encode a primary JPEG image.
 - Encode a gain map JPEG image.
 - Encode color signaling, including ICC profiles.
@@ -225,8 +238,42 @@ The implementation must support:
 - Reading XMP relevant to UltraHDR/gain maps.
 - Writing XMP relevant to UltraHDR/gain maps.
 - Reading ISO 21496-1 metadata if stored in JPEG-associated metadata payloads.
+- Reading Apple Gain Map metadata from older Apple JPEG HDR XMP layouts.
 - Writing ISO 21496-1 metadata where required.
 - Exposing enough structured metadata in Rust types that client code does not need to parse raw XML or raw APP payload bytes unless it chooses to.
+
+### Additional HDR metadata interop target
+
+Beyond the Adobe/Google Ultra HDR metadata layout and ISO 21496-1, the crate
+should also gain decode-side metadata support for Apple Gain Maps.
+
+Initial scope for that work:
+
+- detect Apple Gain Map metadata in fixture-backed real-world JPEGs,
+- parse enough Apple-authored metadata to recognize HDR/gain-map semantics,
+- surface effective parsed metadata through the existing decode/inspect
+  results,
+- keep the public API coherent instead of introducing Apple-specific public
+  wrapper types prematurely.
+
+Non-goals for the first Apple Gain Map step:
+
+- Apple-specific encode support,
+- Apple-specific metadata authoring APIs,
+- exposing every Apple-private or reverse-engineered field before its semantics
+  are understood well enough to stabilize publicly.
+
+The initial target is metadata decode interoperability, not a full parallel
+Apple-specific feature stack.
+
+If Apple-specific encode support later proves trivial to add, it should still
+not ship by default without fixture-backed validation of real Apple consumer
+behavior.
+
+In particular, the crate should not assume that emitting both Apple Gain Map
+metadata and ISO 21496-1 metadata in the same JPEG is safe or desirable until
+precedence and interoperability are established empirically or by clear vendor
+documentation.
 
 ## Versioning and Compatibility Policy
 
@@ -286,10 +333,14 @@ Deliverables:
 - Integration with `ultrahdr_core`.
 - Internal metadata model.
 - Translation between JPEG marker payloads and Rust structs.
+- Decode-side support for additional real-world HDR metadata layouts, including
+  Apple Gain Maps where their semantics overlap with the crate's HDR model.
 
 Exit criteria:
 
 - Known metadata payloads parse and serialize deterministically.
+- Known Apple Gain Map fixture payloads are detected and decoded into stable
+  crate metadata surfaces without regressing existing Ultra HDR behavior.
 
 ### Milestone 4: Decode MVP
 
@@ -299,6 +350,7 @@ Deliverables:
 - Extract ICC/profile/signaling metadata.
 - Detect and decode gain map JPEG payloads.
 - Parse associated UltraHDR metadata.
+- Parse associated Apple Gain Map metadata where present in supported fixtures.
 
 Exit criteria:
 
@@ -336,11 +388,20 @@ Deliverables:
 - Real-world test vectors.
 - Compatibility checks against target readers/writers.
 - Regression corpus.
+- Fixture-backed coverage for older Apple Gain Map JPEG HDR files and for
+  ISO 21496-1-oriented JPEG HDR files.
+- Mixed-metadata fixture investigation for cases where Apple Gain Map metadata
+  and ISO 21496-1 metadata may coexist.
 
 Exit criteria:
 
 - Known-good samples decode correctly.
 - Generated files are accepted by target decoders.
+- Apple Gain Map metadata detection and recovery behavior is covered by
+  integration tests once committed fixtures are available.
+- No Apple-specific encode behavior is enabled by default unless mixed-metadata
+  behavior and precedence have been validated well enough to make the output
+  policy defensible.
 
 ### Milestone 8: Public API stabilization
 
@@ -373,6 +434,8 @@ Exit criteria:
 
 - Small committed JPEG fixtures.
 - HDR/gain-map fixtures where licensing permits.
+- Apple Gain Map and ISO 21496-1 fixtures from real-world sources where
+  licensing permits and provenance is documented.
 - Regression corpus for malformed markers and edge cases.
 
 ### Interop tests
@@ -416,6 +479,8 @@ The public crate must ship with:
   - decoding an HDR JPEG with gain maps
   - encoding a JPEG with gain map metadata
   - reading/writing ICC profiles
+- documentation for metadata decode interoperability, including supported Ultra
+  HDR layouts, ISO 21496-1 handling, and Apple Gain Map detection semantics.
 
 The docs must prominently explain:
 

@@ -3,8 +3,8 @@ use std::{sync::LazyLock, time::Duration};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ultrahdr_core::{ColorGamut, ColorTransfer, GainMapMetadata, PixelFormat, RawImage};
 use ultrajpeg::{
-    CompressedImage, DecodeOptions, EncodeOptions, GainMapEncodeOptions, decode,
-    decode_with_options, inspect, jpeg, sys,
+    DecodeOptions, EncodeOptions, GainMapBundle, compute_gain_map, decode, decode_with_options,
+    encode_ultra_hdr, inspect,
 };
 
 const PLAIN_SDR: &[u8] = include_bytes!("../tests/fixtures/plain-sdr.jpg");
@@ -17,6 +17,8 @@ static LARGE_CORPUS: LazyLock<BenchmarkCorpus> = LazyLock::new(build_large_corpu
 struct BenchmarkCorpus {
     plain: Vec<u8>,
     ultrahdr: Vec<u8>,
+    hdr: RawImage,
+    primary: RawImage,
 }
 
 fn typical_benches(c: &mut Criterion) {
@@ -46,6 +48,7 @@ fn fixture_benches(c: &mut Criterion) {
     let primary = sample_primary(4, 4);
     let gain_map = sample_gain_map(4, 4);
     let gain_map_metadata = sample_gain_map_metadata();
+    let hdr = sample_hdr(4, 4);
 
     let mut group = c.benchmark_group("encode");
     group.bench_function("plain", |b| {
@@ -54,47 +57,24 @@ fn fixture_benches(c: &mut Criterion) {
     });
     group.bench_function("ultrahdr", |b| {
         let options = EncodeOptions {
-            gain_map: Some(GainMapEncodeOptions {
+            gain_map: Some(GainMapBundle {
                 image: gain_map.clone(),
                 metadata: gain_map_metadata.clone(),
                 quality: 80,
                 progressive: false,
             }),
-            ..EncodeOptions::default()
+            ..EncodeOptions::ultra_hdr_defaults()
         };
         b.iter(|| ultrajpeg::encode(black_box(&primary), black_box(&options)).unwrap());
     });
-    group.finish();
-
-    let mut group = c.benchmark_group("compat");
-    group.bench_function("gainmap_metadata", |b| {
-        b.iter_batched(
-            || {
-                CompressedImage::from_slice(
-                    SAMPLE_ULTRAHDR,
-                    sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
-                    sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
-                    sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
-                )
-            },
-            |compressed| {
-                let mut decoder = ultrajpeg::Decoder::new().unwrap();
-                decoder.set_image_owned(compressed).unwrap();
-                black_box(decoder.gainmap_metadata().unwrap());
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
-    group.bench_function("jpeg_encode_rgb", |b| {
-        let encoder = jpeg::Encoder::new(jpeg::Preset::ProgressiveSmallest).quality(90);
+    group.bench_function("compute_gain_map", |b| {
         b.iter(|| {
-            encoder
-                .encode_rgb(
-                    black_box(primary.data.as_slice()),
-                    primary.width,
-                    primary.height,
-                )
-                .unwrap()
+            compute_gain_map(
+                black_box(&hdr),
+                black_box(&primary),
+                black_box(&Default::default()),
+            )
+            .unwrap()
         });
     });
     group.finish();
@@ -125,39 +105,23 @@ fn realistic_benches(c: &mut Criterion, corpus: &BenchmarkCorpus) {
         b.iter(|| {
             decode_with_options(
                 black_box(corpus.ultrahdr.as_slice()),
-                DecodeOptions {
+                black_box(DecodeOptions {
                     decode_gain_map: false,
-                },
+                    ..DecodeOptions::default()
+                }),
             )
             .unwrap()
         });
     });
-    group.bench_function("compat_decode_packed_view_ultrahdr", |b| {
-        b.iter_batched(
-            || {
-                let mut decoder = ultrajpeg::Decoder::new().unwrap();
-                decoder
-                    .set_image_slice(
-                        corpus.ultrahdr.as_slice(),
-                        sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
-                        sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
-                        sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
-                    )
-                    .unwrap();
-                decoder
-            },
-            |mut decoder| {
-                black_box(
-                    decoder
-                        .decode_packed_view(
-                            sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
-                            sys::uhdr_color_transfer::UHDR_CT_PQ,
-                        )
-                        .unwrap(),
-                );
-            },
-            criterion::BatchSize::SmallInput,
-        );
+    group.bench_function("encode_ultra_hdr", |b| {
+        b.iter(|| {
+            encode_ultra_hdr(
+                black_box(&corpus.hdr),
+                black_box(&corpus.primary),
+                black_box(&Default::default()),
+            )
+            .unwrap()
+        });
     });
 
     group.finish();
@@ -167,12 +131,13 @@ fn build_large_corpus() -> BenchmarkCorpus {
     let primary = sample_primary(LARGE_WIDTH, LARGE_HEIGHT);
     let gain_map = sample_gain_map(LARGE_WIDTH, LARGE_HEIGHT);
     let gain_map_metadata = sample_gain_map_metadata();
+    let hdr = sample_hdr(LARGE_WIDTH, LARGE_HEIGHT);
 
     let plain = ultrajpeg::encode(&primary, &EncodeOptions::default()).expect("large plain encode");
     let ultrahdr = ultrajpeg::encode(
         &primary,
         &EncodeOptions {
-            gain_map: Some(GainMapEncodeOptions {
+            gain_map: Some(GainMapBundle {
                 image: gain_map,
                 metadata: gain_map_metadata,
                 quality: 80,
@@ -183,7 +148,12 @@ fn build_large_corpus() -> BenchmarkCorpus {
     )
     .expect("large ultrahdr encode");
 
-    BenchmarkCorpus { plain, ultrahdr }
+    BenchmarkCorpus {
+        plain,
+        ultrahdr,
+        hdr,
+        primary,
+    }
 }
 
 fn sample_primary(width: u32, height: u32) -> RawImage {
@@ -204,7 +174,7 @@ fn sample_primary(width: u32, height: u32) -> RawImage {
         ColorTransfer::Srgb,
         data,
     )
-    .expect("sample primary image")
+    .unwrap()
 }
 
 fn sample_gain_map(width: u32, height: u32) -> RawImage {
@@ -223,7 +193,31 @@ fn sample_gain_map(width: u32, height: u32) -> RawImage {
         ColorTransfer::Linear,
         data,
     )
-    .expect("sample gain map image")
+    .unwrap()
+}
+
+fn sample_hdr(width: u32, height: u32) -> RawImage {
+    let mut data = Vec::with_capacity(width as usize * height as usize * 16);
+    for y in 0..height {
+        for x in 0..width {
+            let r = 1.0 + x as f32 / width.max(1) as f32;
+            let g = 1.0 + y as f32 / height.max(1) as f32;
+            let b = 0.5 + (x ^ y) as f32 / width.max(height).max(1) as f32;
+            for value in [r, g, b, 1.0] {
+                data.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+
+    RawImage::from_data(
+        width,
+        height,
+        PixelFormat::Rgba32F,
+        ColorGamut::DisplayP3,
+        ColorTransfer::Linear,
+        data,
+    )
+    .unwrap()
 }
 
 fn sample_gain_map_metadata() -> GainMapMetadata {
@@ -239,5 +233,5 @@ fn sample_gain_map_metadata() -> GainMapMetadata {
     }
 }
 
-criterion_group!(benches, typical_benches);
-criterion_main!(benches);
+criterion_group!(typical, typical_benches);
+criterion_main!(typical);

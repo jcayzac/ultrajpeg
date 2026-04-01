@@ -1,6 +1,6 @@
 use crate::{
     error::{Error, Result},
-    types::{ChromaSubsampling, ColorMetadata, DecodedGainMap},
+    types::{ChromaSubsampling, DecodedGainMap, PrimaryMetadata},
 };
 use mozjpeg_rs::{Encoder, Preset, Subsampling};
 use ultrahdr_core::{ColorGamut, ColorTransfer, GainMap, GainMapMetadata, PixelFormat, RawImage};
@@ -21,7 +21,7 @@ pub(crate) fn encode_image(
     quality: u8,
     progressive: bool,
     chroma_subsampling: ChromaSubsampling,
-    color_metadata: &ColorMetadata,
+    primary_metadata: &PrimaryMetadata,
 ) -> Result<Vec<u8>> {
     let preset = if progressive {
         Preset::ProgressiveBalanced
@@ -37,10 +37,10 @@ pub(crate) fn encode_image(
             _ => to_subsampling(chroma_subsampling),
         });
 
-    if let Some(exif) = color_metadata.exif.as_ref() {
+    if let Some(exif) = primary_metadata.exif.as_ref() {
         encoder = encoder.exif_data(exif.clone());
     }
-    if let Some(icc_profile) = color_metadata.icc_profile.as_ref() {
+    if let Some(icc_profile) = primary_metadata.color.icc_profile.as_ref() {
         encoder = encoder.icc_profile(icc_profile.clone());
     }
 
@@ -96,8 +96,8 @@ pub(crate) fn decode_gain_map(
     Ok(DecodedGainMap {
         image,
         gain_map,
-        jpeg_bytes: Vec::new(),
         metadata: None,
+        jpeg_bytes: None,
     })
 }
 

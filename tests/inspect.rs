@@ -1,4 +1,4 @@
-use ultrajpeg::{CompressedImage, Decoder as CompatDecoder, decode, inspect, sys};
+use ultrajpeg::{MetadataLocation, decode, inspect};
 
 const PLAIN_SDR: &[u8] = include_bytes!("fixtures/plain-sdr.jpg");
 const SAMPLE_ULTRAHDR: &[u8] = include_bytes!("fixtures/sample-ultrahdr.jpg");
@@ -10,25 +10,38 @@ fn inspect_plain_fixture_exposes_metadata_without_decoding_pixels() {
     assert_eq!(inspected.primary_jpeg_len, PLAIN_SDR.len());
     assert!(inspected.gain_map_jpeg_len.is_none());
     assert_eq!(
-        inspected.color_metadata.icc_profile.as_ref().map(Vec::len),
+        inspected
+            .primary_metadata
+            .color
+            .icc_profile
+            .as_ref()
+            .map(Vec::len),
         Some(19)
     );
-    assert!(inspected.color_metadata.exif.is_some());
+    assert!(inspected.primary_metadata.exif.is_some());
     assert!(inspected.ultra_hdr.is_none());
 }
 
 #[test]
-fn inspect_ultrahdr_fixture_exposes_gain_map_metadata() {
+fn inspect_ultrahdr_fixture_exposes_gain_map_metadata_and_provenance() {
     let inspected = inspect(SAMPLE_ULTRAHDR).unwrap();
 
     assert!(inspected.primary_jpeg_len < SAMPLE_ULTRAHDR.len());
     assert!(inspected.gain_map_jpeg_len.is_some());
-    assert!(inspected.color_metadata.icc_profile.is_some());
+    assert!(inspected.primary_metadata.color.icc_profile.is_some());
     assert!(inspected.ultra_hdr.is_some());
 
     let ultra_hdr = inspected.ultra_hdr.as_ref().unwrap();
     let metadata = ultra_hdr.gain_map_metadata.as_ref().unwrap();
     assert!(metadata.hdr_capacity_max >= 4.0);
+    assert!(matches!(
+        ultra_hdr.xmp_location,
+        Some(MetadataLocation::Primary | MetadataLocation::GainMap)
+    ));
+    assert!(matches!(
+        ultra_hdr.iso_21496_1_location,
+        Some(MetadataLocation::Primary | MetadataLocation::GainMap)
+    ));
 }
 
 #[test]
@@ -39,31 +52,6 @@ fn inspect_succeeds_when_decode_fails_after_sof_corruption() {
     let inspected = inspect(&corrupted).unwrap();
     assert!(inspected.ultra_hdr.is_some());
     assert!(decode(&corrupted).is_err());
-}
-
-#[test]
-fn compat_gainmap_probe_uses_metadata_only_path() {
-    let mut corrupted = SAMPLE_ULTRAHDR.to_vec();
-    zero_out_sof_dimensions(&mut corrupted);
-
-    let mut compressed = CompressedImage::from_bytes(
-        corrupted.as_mut_slice(),
-        sys::uhdr_color_gamut::UHDR_CG_UNSPECIFIED,
-        sys::uhdr_color_transfer::UHDR_CT_UNSPECIFIED,
-        sys::uhdr_color_range::UHDR_CR_UNSPECIFIED,
-    );
-    let mut decoder = CompatDecoder::new().unwrap();
-    decoder.set_image(&mut compressed).unwrap();
-
-    assert!(decoder.gainmap_metadata().unwrap().is_some());
-    assert!(
-        decoder
-            .decode_packed_view(
-                sys::uhdr_img_fmt::UHDR_IMG_FMT_32bppRGBA1010102,
-                sys::uhdr_color_transfer::UHDR_CT_PQ,
-            )
-            .is_err()
-    );
 }
 
 fn zero_out_sof_dimensions(bytes: &mut [u8]) {

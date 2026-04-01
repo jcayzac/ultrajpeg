@@ -5,7 +5,10 @@ use crate::{
         decode_color_metadata, encode_color_metadata, iso_segment_payload,
         parse_ultra_hdr_metadata, xmp_segment_payload,
     },
-    types::{ColorMetadata, DecodeOptions, UltraHdrMetadata},
+    types::{
+        CodestreamLayout, ColorMetadata, ContainerKind, ContainerLayout, DecodeOptions, GamutInfo,
+        MetadataLocation, PrimaryMetadata, UltraHdrMetadata,
+    },
 };
 use img_parts::{
     Bytes, ImageEXIF, ImageICC,
@@ -25,17 +28,21 @@ const EXTENDED_XMP_HEADER_LEN: usize =
 pub(crate) struct ParsedContainer<'a> {
     pub(crate) primary_jpeg: &'a [u8],
     pub(crate) gain_map_jpeg: Option<&'a [u8]>,
-    pub(crate) color_metadata: ColorMetadata,
+    pub(crate) primary_metadata: PrimaryMetadata,
     pub(crate) xmp: Option<String>,
+    pub(crate) xmp_location: Option<MetadataLocation>,
     pub(crate) iso: Option<Vec<u8>>,
+    pub(crate) iso_location: Option<MetadataLocation>,
 }
 
 pub(crate) struct InspectedContainer {
     pub(crate) primary_jpeg_len: usize,
     pub(crate) gain_map_jpeg_len: Option<usize>,
-    pub(crate) color_metadata: ColorMetadata,
+    pub(crate) primary_metadata: PrimaryMetadata,
     pub(crate) xmp: Option<String>,
+    pub(crate) xmp_location: Option<MetadataLocation>,
     pub(crate) iso: Option<Vec<u8>>,
+    pub(crate) iso_location: Option<MetadataLocation>,
 }
 
 pub(crate) fn inspect_container(bytes: &[u8]) -> Result<InspectedContainer> {
@@ -48,9 +55,28 @@ pub(crate) fn inspect_container(bytes: &[u8]) -> Result<InspectedContainer> {
     Ok(InspectedContainer {
         primary_jpeg_len: primary_jpeg.len(),
         gain_map_jpeg_len: gain_map_range.map(|range| range.1 - range.0),
-        color_metadata: scanned.color_metadata,
+        primary_metadata: scanned.primary_metadata,
         xmp: effective_metadata.xmp,
+        xmp_location: effective_metadata.xmp_location,
         iso: effective_metadata.iso,
+        iso_location: effective_metadata.iso_location,
+    })
+}
+
+pub(crate) fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
+    let (kind, codestreams) = codestream_ranges(bytes)?;
+    let gain_map_index = (codestreams.len() > 1).then_some(1);
+    Ok(ContainerLayout {
+        kind,
+        codestreams: codestreams
+            .into_iter()
+            .map(|(offset, end)| CodestreamLayout {
+                offset,
+                len: end - offset,
+            })
+            .collect(),
+        primary_index: 0,
+        gain_map_index,
     })
 }
 
@@ -73,36 +99,24 @@ pub(crate) fn parse_container<'a>(
     Ok(ParsedContainer {
         primary_jpeg,
         gain_map_jpeg,
-        color_metadata: scanned.color_metadata,
+        primary_metadata: scanned.primary_metadata,
         xmp: effective_metadata.xmp,
+        xmp_location: effective_metadata.xmp_location,
         iso: effective_metadata.iso,
+        iso_location: effective_metadata.iso_location,
     })
-}
-
-pub(crate) fn assemble_container(
-    primary_jpeg: &[u8],
-    gain_map_jpeg: Option<&[u8]>,
-    color_metadata: &ColorMetadata,
-    ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
-) -> Result<Vec<u8>> {
-    assemble_container_impl(
-        Bytes::copy_from_slice(primary_jpeg),
-        gain_map_jpeg,
-        color_metadata,
-        ultra_hdr_metadata,
-    )
 }
 
 pub(crate) fn assemble_container_owned(
     primary_jpeg: Vec<u8>,
     gain_map_jpeg: Option<&[u8]>,
-    color_metadata: &ColorMetadata,
+    primary_metadata: &PrimaryMetadata,
     ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
 ) -> Result<Vec<u8>> {
     assemble_container_impl(
         Bytes::from(primary_jpeg),
         gain_map_jpeg,
-        color_metadata,
+        primary_metadata,
         ultra_hdr_metadata,
     )
 }
@@ -110,7 +124,7 @@ pub(crate) fn assemble_container_owned(
 fn assemble_container_impl(
     primary_jpeg: Bytes,
     gain_map_jpeg: Option<&[u8]>,
-    color_metadata: &ColorMetadata,
+    primary_metadata: &PrimaryMetadata,
     ultra_hdr_metadata: Option<&EncodedUltraHdrMetadata>,
 ) -> Result<Vec<u8>> {
     let mut jpeg = Jpeg::from_bytes(primary_jpeg)?;
@@ -118,10 +132,10 @@ fn assemble_container_impl(
         .map(|gain_map_jpeg| rewrite_gain_map_jpeg(gain_map_jpeg, ultra_hdr_metadata))
         .transpose()?;
 
-    if let Some(icc_profile) = color_metadata.icc_profile.clone() {
+    if let Some(icc_profile) = primary_metadata.color.icc_profile.clone() {
         jpeg.set_icc_profile(Some(Bytes::from(icc_profile)));
     }
-    if let Some(exif) = color_metadata.exif.clone() {
+    if let Some(exif) = primary_metadata.exif.clone() {
         jpeg.set_exif(Some(Bytes::from(exif)));
     }
 
@@ -133,7 +147,7 @@ fn assemble_container_impl(
         insert_at = insert_xmp_segment(&mut jpeg, insert_at, Some(&ultra_hdr_metadata.primary_xmp));
     }
 
-    if let Some(explicit_color) = encode_color_metadata(color_metadata) {
+    if let Some(explicit_color) = encode_color_metadata(&primary_metadata.color) {
         jpeg.segments_mut().insert(
             insert_at,
             JpegSegment::new_with_contents(markers::APP11, Bytes::from(explicit_color)),
@@ -161,42 +175,52 @@ fn assemble_container_impl(
 }
 
 fn primary_range(bytes: &[u8]) -> Result<(usize, usize)> {
-    if let Ok(images) = parse_mpf(bytes)
-        && let Some(range) = images.first().copied()
-    {
-        return Ok(range);
-    }
-
-    find_jpeg_boundaries(bytes)
-        .into_iter()
-        .next()
+    codestream_ranges(bytes)?
+        .1
+        .first()
+        .copied()
         .ok_or_else(|| Error::Container("could not locate a JPEG codestream".into()))
 }
 
 fn gain_map_range(bytes: &[u8]) -> Option<(usize, usize)> {
+    codestream_ranges(bytes)
+        .ok()
+        .and_then(|(_, codestreams)| codestreams.get(1).copied())
+}
+
+fn codestream_ranges(bytes: &[u8]) -> Result<(ContainerKind, Vec<(usize, usize)>)> {
     if let Ok(images) = parse_mpf(bytes)
-        && let Some(range) = images.get(1).copied()
+        && !images.is_empty()
     {
-        return Some(range);
+        return Ok((ContainerKind::Mpf, images));
     }
 
-    let boundaries = find_jpeg_boundaries(bytes);
-    if boundaries.len() > 1 {
-        return boundaries.get(1).copied();
+    let codestreams = find_jpeg_boundaries(bytes);
+    if codestreams.is_empty() {
+        return Err(Error::Container(
+            "could not locate a JPEG codestream".into(),
+        ));
     }
 
-    None
+    let kind = if codestreams.len() > 1 {
+        ContainerKind::ConcatenatedJpegs
+    } else {
+        ContainerKind::Jpeg
+    };
+    Ok((kind, codestreams))
 }
 
 struct ScannedMetadata {
-    color_metadata: ColorMetadata,
+    primary_metadata: PrimaryMetadata,
     xmp: Option<String>,
     iso: Option<Vec<u8>>,
 }
 
 struct EffectiveUltraHdrSources {
     xmp: Option<String>,
+    xmp_location: Option<MetadataLocation>,
     iso: Option<Vec<u8>>,
+    iso_location: Option<MetadataLocation>,
 }
 
 #[derive(Debug)]
@@ -281,12 +305,23 @@ fn scan_primary_metadata(primary_jpeg: &[u8]) -> Result<ScannedMetadata> {
         }
     }
 
+    let icc_profile = assemble_icc_profile(icc_chunks)?;
+    let gamut_info = gamut.map(GamutInfo::from_standard).or_else(|| {
+        icc_profile
+            .as_deref()
+            .and_then(crate::icc::gamut_info_from_profile)
+    });
+    let gamut = gamut.or_else(|| gamut_info.as_ref().and_then(|info| info.standard));
+
     Ok(ScannedMetadata {
-        color_metadata: ColorMetadata {
-            icc_profile: assemble_icc_profile(icc_chunks)?,
+        primary_metadata: PrimaryMetadata {
+            color: ColorMetadata {
+                icc_profile,
+                gamut,
+                gamut_info,
+                transfer,
+            },
             exif,
-            gamut,
-            transfer,
         },
         xmp: reassemble_xmp(xmp, extended_xmp_chunks)?,
         iso,
@@ -390,19 +425,27 @@ fn effective_ultra_hdr_sources(
     primary: &ScannedMetadata,
     gain_map_range: Option<(usize, usize)>,
 ) -> Result<EffectiveUltraHdrSources> {
-    let primary_metadata =
-        parse_ultra_hdr_metadata(primary.xmp.as_deref(), primary.iso.as_deref())?;
+    let primary_metadata = parse_ultra_hdr_metadata(
+        primary.xmp.as_deref(),
+        primary.xmp.as_ref().map(|_| MetadataLocation::Primary),
+        primary.iso.as_deref(),
+        primary.iso.as_ref().map(|_| MetadataLocation::Primary),
+    )?;
     if has_effective_gain_map_metadata(primary_metadata.as_ref()) {
         return Ok(EffectiveUltraHdrSources {
             xmp: primary.xmp.clone(),
+            xmp_location: primary.xmp.as_ref().map(|_| MetadataLocation::Primary),
             iso: primary.iso.clone(),
+            iso_location: primary.iso.as_ref().map(|_| MetadataLocation::Primary),
         });
     }
 
     let Some(gain_map_range) = gain_map_range else {
         return Ok(EffectiveUltraHdrSources {
             xmp: primary.xmp.clone(),
+            xmp_location: primary.xmp.as_ref().map(|_| MetadataLocation::Primary),
             iso: primary.iso.clone(),
+            iso_location: primary.iso.as_ref().map(|_| MetadataLocation::Primary),
         });
     };
 
@@ -410,19 +453,39 @@ fn effective_ultra_hdr_sources(
     let gain_map_metadata = scan_primary_metadata(gain_map_jpeg)?;
     let parsed_gain_map_metadata = parse_ultra_hdr_metadata(
         gain_map_metadata.xmp.as_deref(),
+        gain_map_metadata
+            .xmp
+            .as_ref()
+            .map(|_| MetadataLocation::GainMap),
         gain_map_metadata.iso.as_deref(),
+        gain_map_metadata
+            .iso
+            .as_ref()
+            .map(|_| MetadataLocation::GainMap),
     )?;
 
     if has_effective_gain_map_metadata(parsed_gain_map_metadata.as_ref()) {
+        let xmp_location = gain_map_metadata
+            .xmp
+            .as_ref()
+            .map(|_| MetadataLocation::GainMap);
+        let iso_location = gain_map_metadata
+            .iso
+            .as_ref()
+            .map(|_| MetadataLocation::GainMap);
         return Ok(EffectiveUltraHdrSources {
             xmp: gain_map_metadata.xmp,
+            xmp_location,
             iso: gain_map_metadata.iso,
+            iso_location,
         });
     }
 
     Ok(EffectiveUltraHdrSources {
         xmp: primary.xmp.clone(),
+        xmp_location: primary.xmp.as_ref().map(|_| MetadataLocation::Primary),
         iso: primary.iso.clone(),
+        iso_location: primary.iso.as_ref().map(|_| MetadataLocation::Primary),
     })
 }
 
