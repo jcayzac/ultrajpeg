@@ -166,6 +166,10 @@ pub fn inspect(bytes: &[u8]) -> Result<Inspection> {
 /// For non-MPF multi-JPEG inputs, `ultrajpeg` treats the second codestream as
 /// the gain-map candidate structurally; semantic validity is determined
 /// separately by metadata parsing on decode or inspect.
+///
+/// The offsets and lengths in [`ContainerLayout::codestreams`] are byte ranges
+/// into the original input buffer, so callers can slice the original bytes as
+/// `&bytes[offset..offset + len]` when they need direct codestream access.
 pub fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
     inspect_layout_impl(bytes)
 }
@@ -222,6 +226,12 @@ pub fn compute_gain_map(
 ///
 /// Container-only XMP that does not actually carry `hdrgm:*` metadata does not
 /// parse successfully here.
+///
+/// In other words:
+///
+/// - [`inspect`] and [`decode`] expose the crate's effective metadata view
+/// - [`parse_gain_map_xmp`] parses exactly one raw XMP payload that the caller
+///   already has
 pub fn parse_gain_map_xmp(xmp: &str) -> Result<ParsedGainMapXmp> {
     parse_gain_map_xmp_raw(xmp)
 }
@@ -234,6 +244,12 @@ pub fn parse_gain_map_xmp(xmp: &str) -> Result<ParsedGainMapXmp> {
 /// - it does not compare the result against any XMP payload
 /// - it is intended for callers that need to validate or compare raw payloads
 ///   explicitly
+///
+/// In other words:
+///
+/// - [`inspect`] and [`decode`] expose the crate's effective metadata view
+/// - [`parse_iso_21496_1`] parses exactly one raw ISO payload that the caller
+///   already has
 pub fn parse_iso_21496_1(iso_21496_1: &[u8]) -> Result<GainMapMetadata> {
     parse_iso_21496_1_raw(iso_21496_1)
 }
@@ -266,6 +282,11 @@ pub fn parse_iso_21496_1(iso_21496_1: &[u8]) -> Result<GainMapMetadata> {
 /// To keep the default [`compute_gain_map`] workflow composable, this helper
 /// also floors the derived SDR primary brightness so that the prepared image
 /// stays within the crate's default gain-map boost envelope.
+///
+/// This helper is meant to provide a supported default policy, not to replace
+/// all caller-specific SDR rendering intent. Callers that already have a
+/// bespoke SDR primary image should keep using that image directly with
+/// [`compute_gain_map`] and [`encode`].
 pub fn prepare_sdr_primary(
     image: &Image,
     options: &PreparePrimaryOptions,

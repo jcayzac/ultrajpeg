@@ -4,7 +4,7 @@
 
 Detailed migration guide:
 
-- [Migration guide from `0.4.0-rc6` to `0.5.0-rc1`](docs/user/migration-0.5.md)
+- [Migration guide from `0.4.0` to `0.5.0`](docs/user/migration-0.5.md)
 
 ### Added
 
@@ -16,11 +16,21 @@ Detailed migration guide:
 - Added `docs/maintainer/api-guide.md` as the maintainer-facing summary of the
   implemented stable API shape and its maintenance rules.
 - Added `docs/user/migration-0.5.md` with a detailed migration path from
-  `0.4.0-rc6`.
+  `0.4.0`.
+- Added public raw Ultra HDR payload parsing with
+  `parse_gain_map_xmp(...)`, `parse_iso_21496_1(...)`, and the supporting
+  `ParsedGainMapXmp` type.
+- Added public structural container inspection with
+  `inspect_container_layout(...)`, `ContainerKind`, `CodestreamLayout`, and
+  `ContainerLayout`.
+- Added public SDR-primary preparation for caller-managed HDR workflows with
+  `prepare_sdr_primary(...)`, `PreparePrimaryOptions`, and `PreparedPrimary`.
 
 ### Changed
 
-- Bumped the crate version to `0.5.0-rc1`.
+- The `0.5.0` line began with the main stable native API refactor and then
+  gained additional additive APIs before the full `0.5.0` shape described
+  here.
 - Removed the wrapper-era compatibility API from the public crate surface.
 - Simplified the root API around one native surface with `Image`, `encode`,
   `Encoder`, `decode`, `DecodedImage`, `inspect`, and `Inspection`.
@@ -36,19 +46,32 @@ Detailed migration guide:
   default; retained codestreams are now explicit through `DecodeOptions`.
 - `ComputedGainMap::into_encode_options(...)` was replaced by
   `ComputedGainMap::into_bundle(...)`.
+- The `0.5.0` API surface now closes the main post-refactor gaps that still
+  forced direct `ultrahdr-core` usage for some consumers:
+  raw Ultra HDR payload parsing, structural bundled-container inspection, and
+  supported SDR-primary preparation.
+- `prepare_sdr_primary(...)` applies an explicit high-level SDR preparation
+  policy, including brightness flooring so the returned primary image composes
+  with the crate's default `compute_gain_map(...)` configuration.
 
 ### Migration
 
-- Expect source changes if you were using `0.4.0-rc6`; this is an intentional
+- Expect source changes if you were using `0.4.0`; this is an intentional
   API-shaping release before `1.0`.
 - Port native callers to `Image`, `PrimaryMetadata`, `DecodedImage`,
   `Inspection`, `GainMapBundle`, and `Encoder`.
 - If you relied on default retained codestream bytes from `decode(...)`, switch
   to `decode_with_options(...)` and enable the relevant retention flags
   explicitly.
-- If you relied on the old compatibility API, either stay on `0.4.0-rc6` for
+- If you relied on the old compatibility API, either stay on `0.4.0` for
   now or port to the native root API; the compatibility surface is no longer
-  public in `0.5.0-rc1`.
+  public in `0.5.0`.
+- If you currently depend directly on `ultrahdr-core` only for raw `hdrgm:*`
+  XMP parsing, raw ISO 21496-1 parsing, or bundled codestream-boundary
+  inspection, prefer the new `0.5.0` root APIs instead.
+- If you previously hand-rolled HDR-to-SDR preparation just to feed
+  `compute_gain_map(...)`, evaluate `prepare_sdr_primary(...)` as the supported
+  high-level default path.
 
 ## 0.4.0
 
@@ -92,7 +115,7 @@ Detailed migration guide:
 
 ### Changed
 
-- The crate version is now `0.3.0-rc1`.
+- The crate version is now `0.3.0`.
 - `Decoder::decode_packed_view()` now uses a faster internal decode path that skips retaining primary and gain-map codestream copies that are irrelevant to packed HDR reconstruction.
 - UltraHDR primary-image decode and gain-map decode can now run in parallel internally for larger containers, using Rayon behind a size threshold and without changing the public API shape.
 - The benchmark suite now measures larger, more realistic decode paths instead of only tiny fixture-sized scenarios.

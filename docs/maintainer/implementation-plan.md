@@ -2,8 +2,8 @@
 
 ## Status
 
-The stable native API refactor described in this plan was implemented in
-`0.5.0-rc1`.
+The stable native API refactor described in this plan was implemented for
+`0.5.0`.
 
 This document is retained as historical planning context. For current
 maintainer-facing guidance, see:

@@ -193,6 +193,33 @@ let jpeg = ultrajpeg::encode(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+If the source HDR peak is known more precisely, pass it explicitly:
+
+```rust
+# use ultrajpeg::{PreparePrimaryOptions, prepare_sdr_primary};
+# use ultrajpeg::{ColorGamut, ColorTransfer, Image, PixelFormat};
+# let hdr = Image::from_data(
+#     1,
+#     1,
+#     PixelFormat::Rgba32F,
+#     ColorGamut::DisplayP3,
+#     ColorTransfer::Linear,
+#     [1.5f32, 0.5, 0.5, 1.0]
+#         .into_iter()
+#         .flat_map(f32::to_le_bytes)
+#         .collect(),
+# )?;
+let prepared = prepare_sdr_primary(
+    &hdr,
+    &PreparePrimaryOptions {
+        source_peak_nits: Some(4000.0),
+        ..PreparePrimaryOptions::ultra_hdr_defaults()
+    },
+)?;
+# let _ = prepared;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ### One-Shot Ultra HDR Packaging
 
 ```rust

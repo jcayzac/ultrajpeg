@@ -2,7 +2,7 @@
 
 ## Status
 
-This draft was implemented in `0.5.0-rc1`.
+This draft is implemented for `0.5.0`.
 
 Later additive work also filled the public gaps identified in issue `#4`:
 

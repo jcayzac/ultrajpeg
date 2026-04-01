@@ -43,6 +43,8 @@ Use:
 - `prepare_sdr_primary(...)` when you manage HDR pixel transforms yourself and
   need a supported SDR primary image plus matching metadata before computing a
   gain map
+  use your own SDR primary instead when you already have a caller-specific SDR
+  rendering policy you want to preserve exactly
 - `compute_gain_map(...)` when you want to generate a gain map from HDR and SDR
   inputs without encoding yet
 - `encode_ultra_hdr(...)` when you want the crate to compute the gain map and

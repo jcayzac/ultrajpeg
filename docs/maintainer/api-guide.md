@@ -2,8 +2,8 @@
 
 ## Status
 
-The stable native API refactor described in the planning documents was
-implemented in `0.5.0-rc1`.
+The stable native API refactor described in the planning documents is
+implemented for `0.5.0`.
 
 This file is the maintainer-facing summary of the implemented public contract,
 the intended invariants behind it, and the rules future changes should follow.

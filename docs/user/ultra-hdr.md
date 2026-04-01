@@ -86,6 +86,38 @@ The current helper:
 - injects bundled Display-P3 ICC metadata automatically when Display-P3 output
   is requested
 
+### Policy Notes For `prepare_sdr_primary(...)`
+
+`prepare_sdr_primary(...)` is a supported default policy, not a promise to
+reproduce every caller's preferred SDR rendering intent.
+
+In practice:
+
+- if you already have a caller-chosen SDR primary image, keep using that image
+  with `compute_gain_map(...)` and `encode(...)`
+- if you want `ultrajpeg` to derive a reasonable SDR primary for a transformed
+  HDR image, use `prepare_sdr_primary(...)`
+- if you know the source HDR peak more precisely, set
+  `PreparePrimaryOptions::source_peak_nits` explicitly instead of relying on
+  the transfer-based default
+
+Current defaults are:
+
+- PQ input with `source_peak_nits: None` assumes `10000` nits
+- HLG input with `source_peak_nits: None` assumes `1000` nits
+- linear input with `source_peak_nits: None` assumes `1000` nits
+- sRGB input with `source_peak_nits: None` assumes `203` nits
+
+The helper also enforces a small but important compatibility rule: it floors
+the derived SDR primary brightness so the returned image composes with the
+crate's default `compute_gain_map(...)` configuration instead of immediately
+falling outside the default gain-map boost range.
+
+That makes the default workflow easier to use, but it also means the output is
+not just a naive one-pass tone map. If you need exact custom SDR rendering
+intent, prepare the SDR primary image yourself and treat `prepare_sdr_primary`
+as the optional convenience path rather than as the only supported one.
+
 ## Ownership And Performance Semantics
 
 The public API is explicit about allocation behavior:

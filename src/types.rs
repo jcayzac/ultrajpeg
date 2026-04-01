@@ -214,6 +214,9 @@ pub struct Inspection {
 /// This type exposes the gain-map metadata carried by a raw XMP payload and
 /// the optional bundled gain-map JPEG length signaled by the container
 /// directory.
+///
+/// This is a raw-payload view, not the crate's effective decode-time metadata
+/// view.
 #[derive(Debug, Clone)]
 pub struct ParsedGainMapXmp {
     /// Parsed gain-map metadata.
@@ -240,6 +243,9 @@ pub struct CodestreamLayout {
     /// Byte offset of the codestream start in the original input.
     pub offset: usize,
     /// Byte length of the codestream.
+    ///
+    /// Together with [`CodestreamLayout::offset`], this forms a sliceable
+    /// byte range into the original input buffer.
     pub len: usize,
 }
 
@@ -354,6 +360,10 @@ pub struct ComputedGainMap {
 /// - for HLG input, `None` defaults to `1000`
 /// - for linear input, `None` defaults to `1000`
 /// - for sRGB input, `None` defaults to `203`
+///
+/// This option controls how bright the source HDR image is assumed to be. If a
+/// caller knows the source mastering or editing peak more precisely, it should
+/// pass an explicit value instead of relying on the transfer-based default.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparePrimaryOptions {
     /// Target gamut for the SDR primary image.
@@ -365,8 +375,14 @@ pub struct PreparePrimaryOptions {
     ///
     /// When set to `None`, `ultrajpeg` picks a transfer-specific default as
     /// described on [`PreparePrimaryOptions`].
+    ///
+    /// This affects the tone-mapping policy used by
+    /// [`crate::prepare_sdr_primary`].
     pub source_peak_nits: Option<f32>,
     /// Target SDR peak luminance in nits.
+    ///
+    /// The default `203` nits matches the crate's current SDR preparation
+    /// policy for Ultra HDR workflows.
     pub target_peak_nits: f32,
 }
 
@@ -378,6 +394,9 @@ pub struct PreparePrimaryOptions {
 ///
 /// [`PreparedPrimary::image`] and [`PreparedPrimary::metadata`] are intended to
 /// be used together on subsequent encode calls.
+///
+/// Callers that discard the returned metadata are responsible for recreating a
+/// consistent primary-image metadata policy themselves.
 #[derive(Debug, Clone)]
 pub struct PreparedPrimary {
     /// Prepared SDR primary image pixels.
@@ -541,6 +560,10 @@ impl PreparePrimaryOptions {
     ///
     /// This is a high-level policy default, not a guarantee of source-image
     /// conformance checking.
+    ///
+    /// It is intended for the common case where the caller wants a prepared SDR
+    /// primary that composes cleanly with the crate's default
+    /// [`crate::compute_gain_map`] path.
     #[must_use]
     pub fn ultra_hdr_defaults() -> Self {
         Self {
