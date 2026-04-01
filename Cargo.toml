@@ -1,6 +1,6 @@
 [package]
 name = "ultrajpeg"
-version = "0.5.0-rc6"
+version = "0.5.0-rc7"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "JPEG encoder/decoder with mozjpeg support and Ultra HDR Image Format v1.1 support."
@@ -9,6 +9,18 @@ homepage = "https://github.com/jcayzac/ultrajpeg"
 readme = "README.md"
 keywords = ["jpeg", "hdr", "ultrahdr", "gain-map", "image"]
 categories = ["multimedia::images", "encoding"]
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/assets/icc/*.icc",
+    "/docs/user/**",
+    "/examples/**",
+    "/src/**",
+]
 
 [workspace]
 members = [".", "xtask"]
