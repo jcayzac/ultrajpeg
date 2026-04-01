@@ -56,6 +56,10 @@ Detailed migration guide:
   JPEGs: encode writes the primary version-only APP2 block plus canonical
   gain-map ISO payloads, and decode/raw parsing now accept those canonical
   payloads while keeping compatibility with the older legacy payload layout.
+- The primary Ultra HDR container XMP now derives `Item:Length` from the final
+  rewritten embedded gain-map JPEG codestream length, so the bundled container
+  directory stays internally consistent after gain-map XMP and ISO metadata
+  injection.
 - The primary Ultra HDR container XMP now also declares the `hdrgm`
   namespace/version on its container packet, matching the expected packet shape
   without moving gain-map parameter fields out of the gain-map JPEG XMP.

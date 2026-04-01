@@ -28,7 +28,6 @@ const LEGACY_ISO_FLAG_BACKWARD_DIRECTION: u8 = 0x04;
 const ISO_PREFERRED_DENOMINATOR_SHIFT: u32 = 28;
 
 pub(crate) struct EncodedUltraHdrMetadata {
-    pub(crate) primary_xmp: String,
     pub(crate) primary_iso_21496_1: Vec<u8>,
     pub(crate) gain_map_xmp: String,
     pub(crate) gain_map_iso_21496_1: Vec<u8>,
@@ -36,10 +35,8 @@ pub(crate) struct EncodedUltraHdrMetadata {
 
 pub(crate) fn build_ultra_hdr_metadata(
     metadata: &GainMapMetadata,
-    gain_map_length: usize,
 ) -> Result<EncodedUltraHdrMetadata> {
     Ok(EncodedUltraHdrMetadata {
-        primary_xmp: generate_container_xmp(gain_map_length),
         primary_iso_21496_1: serialize_primary_iso_21496_1(),
         gain_map_xmp: generate_gain_map_xmp(metadata),
         gain_map_iso_21496_1: serialize_gain_map_iso_21496_1(metadata)?,
@@ -777,6 +774,10 @@ fn generate_container_xmp(gain_map_length: usize) -> String {
 </x:xmpmeta>
 <?xpacket end="w"?>"#
     )
+}
+
+pub(crate) fn container_xmp_for_gain_map_length(gain_map_length: usize) -> String {
+    generate_container_xmp(gain_map_length)
 }
 
 fn generate_gain_map_xmp(metadata: &GainMapMetadata) -> String {

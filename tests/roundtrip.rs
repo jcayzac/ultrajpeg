@@ -183,6 +183,15 @@ fn canonical_sample_gain_map_iso_payload() -> Vec<u8> {
     ]
 }
 
+fn primary_xmp_gain_map_length(xmp: &str) -> Option<usize> {
+    let semantic = "Item:Semantic=\"GainMap\"";
+    let start = xmp.find(semantic)?;
+    let length_attr = "Item:Length=\"";
+    let length_start = xmp[start..].find(length_attr)? + start + length_attr.len();
+    let length_end = xmp[length_start..].find('"')? + length_start;
+    xmp[length_start..length_end].parse().ok()
+}
+
 fn start_of_frame_marker(bytes: &[u8]) -> u8 {
     let jpeg = Jpeg::from_bytes(Bytes::copy_from_slice(bytes)).unwrap();
     jpeg.segments()
@@ -304,6 +313,10 @@ fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
     assert!(primary_xmp.contains("Item:Semantic=\"Primary\""));
     assert!(primary_xmp.contains("Item:Semantic=\"GainMap\""));
     assert!(!primary_xmp.contains("hdrgm:GainMapMax"));
+    assert_eq!(
+        primary_xmp_gain_map_length(&primary_xmp),
+        Some(codestreams[1].len())
+    );
     assert_eq!(
         iso_payload(codestreams[0]),
         Some(vec![0x00, 0x00, 0x00, 0x00])

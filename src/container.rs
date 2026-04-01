@@ -2,8 +2,8 @@ use crate::{
     error::{Error, Result},
     metadata::{
         COLOR_MARKER_PREFIX, EncodedUltraHdrMetadata, ISO_NAMESPACE, XMP_NAMESPACE,
-        decode_color_metadata, encode_color_metadata, iso_segment_payload,
-        parse_ultra_hdr_metadata, xmp_segment_payload,
+        container_xmp_for_gain_map_length, decode_color_metadata, encode_color_metadata,
+        iso_segment_payload, parse_ultra_hdr_metadata, xmp_segment_payload,
     },
     types::{
         CodestreamLayout, ColorMetadata, ContainerKind, ContainerLayout, DecodeOptions, GamutInfo,
@@ -144,7 +144,10 @@ fn assemble_container_impl(
     let mut insert_at = metadata_insert_index(&jpeg);
 
     if let Some(ultra_hdr_metadata) = ultra_hdr_metadata {
-        insert_at = insert_xmp_segment(&mut jpeg, insert_at, Some(&ultra_hdr_metadata.primary_xmp));
+        let primary_xmp = gain_map_jpeg
+            .as_ref()
+            .map(|gain_map_jpeg| container_xmp_for_gain_map_length(gain_map_jpeg.len()));
+        insert_at = insert_xmp_segment(&mut jpeg, insert_at, primary_xmp.as_deref());
         insert_at = insert_iso_segment(
             &mut jpeg,
             insert_at,

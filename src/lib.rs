@@ -368,7 +368,7 @@ impl Encoder {
                     ChromaSubsampling::Yuv444,
                     &PrimaryMetadata::default(),
                 )?;
-                let metadata = build_ultra_hdr_metadata(&gain_map.metadata, jpeg.len())?;
+                let metadata = build_ultra_hdr_metadata(&gain_map.metadata)?;
                 (Some(jpeg), Some(metadata))
             }
             None => (None, None),
