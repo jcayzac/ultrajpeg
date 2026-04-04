@@ -69,6 +69,8 @@ pub use types::PrimaryMetadata;
 pub use types::UltraHdrEncodeOptions;
 /// Structured effective Ultra HDR metadata resolved by the crate.
 pub use types::UltraHdrMetadata;
+/// Opt-out controls for Ultra HDR metadata emission during gain-map packaging.
+pub use types::UltraHdrMetadataEmission;
 
 /// Named color gamut classification used by decoded images and metadata.
 pub use ultrahdr_core::ColorGamut;
@@ -185,6 +187,10 @@ pub fn inspect_container_layout(bytes: &[u8]) -> Result<ContainerLayout> {
 /// - container or directory XMP on the primary JPEG
 /// - `hdrgm:*` XMP on the gain-map JPEG
 /// - ISO 21496-1 metadata on the gain-map JPEG
+///
+/// Callers can selectively omit one of those metadata paths for testing by
+/// changing [`EncodeOptions::ultra_hdr_metadata_emission`]. The default keeps
+/// every supported metadata path enabled.
 ///
 /// Primary-image ICC handling is explicit:
 ///
@@ -372,7 +378,10 @@ impl Encoder {
                     ChromaSubsampling::Yuv444,
                     &PrimaryMetadata::default(),
                 )?;
-                let metadata = build_ultra_hdr_metadata(&gain_map.metadata)?;
+                let metadata = build_ultra_hdr_metadata(
+                    &gain_map.metadata,
+                    self.options.ultra_hdr_metadata_emission,
+                )?;
                 (Some(jpeg), Some(metadata))
             }
             None => (None, None),

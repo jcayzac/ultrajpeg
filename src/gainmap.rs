@@ -37,6 +37,7 @@ pub(crate) fn compute_gain_map_impl(
 ) -> Result<ComputedGainMap> {
     let config = GainMapConfig {
         multi_channel: matches!(options.channels, GainMapChannels::Multi),
+        scale_factor: options.scale_factor,
         ..GainMapConfig::default()
     };
 

@@ -353,6 +353,38 @@ pub struct GainMapBundle {
     pub compression: CompressionEffort,
 }
 
+/// Opt-out controls for Ultra HDR metadata emission during gain-map packaging.
+///
+/// The default policy is to emit every supported metadata path:
+///
+/// - primary container/directory XMP
+/// - gain-map `hdrgm:*` XMP
+/// - ISO 21496-1 payloads
+///
+/// These flags exist so callers can selectively omit one metadata path for
+/// interoperability testing or debugging while still bundling the gain-map
+/// JPEG itself.
+///
+/// Omitting metadata here does not remove the gain-map image. That remains
+/// controlled by whether [`EncodeOptions::gain_map`] is `Some`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UltraHdrMetadataEmission {
+    /// Whether to emit the primary JPEG's container/directory XMP.
+    ///
+    /// When enabled, this is the primary-side XMP that advertises the bundled
+    /// gain-map codestream and declares the `hdrgm` namespace/version.
+    pub emit_primary_container_xmp: bool,
+    /// Whether to emit `hdrgm:*` XMP on the gain-map JPEG.
+    pub emit_gain_map_xmp: bool,
+    /// Whether to emit ISO 21496-1 APP2 payloads.
+    ///
+    /// When enabled, this applies to both:
+    ///
+    /// - the primary JPEG's four-byte version-only structural ISO block
+    /// - the gain-map JPEG's canonical ISO 21496-1 metadata payload
+    pub emit_iso_21496_1: bool,
+}
+
 /// Gain-map channel layout for computed Ultra HDR metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GainMapChannels {
@@ -364,12 +396,20 @@ pub enum GainMapChannels {
 }
 
 /// Options for gain-map computation from HDR and SDR primary images.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComputeGainMapOptions {
     /// Whether the computed gain map should be single-channel or multichannel.
     ///
     /// The default is [`GainMapChannels::Single`].
     pub channels: GainMapChannels,
+    /// Spatial downscale factor for the computed gain map.
+    ///
+    /// `1` keeps the gain map at full primary-image resolution.
+    /// `2` produces a gain map at half width/height.
+    /// `4` produces a gain map at quarter width/height.
+    ///
+    /// Values smaller than `1` are clamped by the underlying gain-map core.
+    pub scale_factor: u8,
 }
 
 /// Result of computing an Ultra HDR gain map from HDR and SDR images.
@@ -472,6 +512,13 @@ pub struct EncodeOptions {
     pub chroma_subsampling: ChromaSubsampling,
     /// Primary-JPEG metadata to embed in the output.
     pub primary_metadata: PrimaryMetadata,
+    /// Opt-out controls for Ultra HDR metadata emission when a gain map is
+    /// bundled.
+    ///
+    /// The default emits all supported metadata paths. Use this only when a
+    /// caller intentionally wants an `XMP-only` or `ISO-only` output for
+    /// interoperability testing.
+    pub ultra_hdr_metadata_emission: UltraHdrMetadataEmission,
     /// Optional gain-map image and metadata to bundle into an Ultra HDR
     /// container.
     pub gain_map: Option<GainMapBundle>,
@@ -513,7 +560,18 @@ impl Default for EncodeOptions {
             compression: CompressionEffort::Balanced,
             chroma_subsampling: ChromaSubsampling::Yuv420,
             primary_metadata: PrimaryMetadata::default(),
+            ultra_hdr_metadata_emission: UltraHdrMetadataEmission::default(),
             gain_map: None,
+        }
+    }
+}
+
+impl Default for UltraHdrMetadataEmission {
+    fn default() -> Self {
+        Self {
+            emit_primary_container_xmp: true,
+            emit_gain_map_xmp: true,
+            emit_iso_21496_1: true,
         }
     }
 }
@@ -536,6 +594,15 @@ impl Default for PreparePrimaryOptions {
             target_gamut: ColorGamut::Bt709,
             source_peak_nits: None,
             target_peak_nits: 203.0,
+        }
+    }
+}
+
+impl Default for ComputeGainMapOptions {
+    fn default() -> Self {
+        Self {
+            channels: GainMapChannels::Single,
+            scale_factor: 4,
         }
     }
 }
