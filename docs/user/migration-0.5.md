@@ -207,6 +207,12 @@ compression: CompressionEffort::Balanced
 Use `CompressionEffort::Smallest` when you want the most size-oriented
 configuration available for the chosen scan mode.
 
+`ComputeGainMapOptions` also now exposes a typed `scale` control through
+`GainMapScale`. The default is `GainMapScale::Default`, which computes the
+gain map at half primary-image width and height. Use `GainMapScale::Full` for
+best quality or `GainMapScale::Smallest` for the most aggressive
+quarter-resolution size tradeoff.
+
 ## Decode Migration
 
 ### Result type and fields

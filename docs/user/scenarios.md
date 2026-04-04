@@ -131,7 +131,7 @@ let jpeg = ultrajpeg::encode(
 ```rust
 # use ultrajpeg::{
 #     ColorGamut, ColorTransfer, CompressionEffort, ComputeGainMapOptions, EncodeOptions,
-#     Image, PixelFormat,
+#     GainMapScale, Image, PixelFormat,
 # };
 let hdr = Image::from_data(
     1,
@@ -153,7 +153,14 @@ let primary = Image::from_data(
     vec![255, 128, 128],
 )?;
 
-let computed = ultrajpeg::compute_gain_map(&hdr, &primary, &ComputeGainMapOptions::default())?;
+let computed = ultrajpeg::compute_gain_map(
+    &hdr,
+    &primary,
+    &ComputeGainMapOptions {
+        scale: GainMapScale::Default,
+        ..ComputeGainMapOptions::default()
+    },
+)?;
 let jpeg = ultrajpeg::encode(
     &primary,
     &EncodeOptions {
@@ -164,6 +171,11 @@ let jpeg = ultrajpeg::encode(
 # let _ = jpeg;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`GainMapScale::Default` computes the gain map at half primary-image width and
+height. Use `GainMapScale::Full` when quality matters most, or
+`GainMapScale::Smallest` when you explicitly want the most aggressive
+quarter-resolution tradeoff.
 
 ### Prepare An SDR Primary Image From HDR Pixels
 

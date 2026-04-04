@@ -1305,6 +1305,23 @@ If the crate keeps a stateful encoder type, its name should be the obvious one:
 Similarly, if a stateful decoder type is later justified for the native API, it
 should use the obvious name only in the native namespace.
 
+#### HDR naming
+
+The public API should move away from `UltraHdr` / `ultra_hdr` prefixes and
+namespaces.
+
+The preferred direction is:
+
+- use `Hdr` / `hdr` only when the API is specifically about HDR rather than
+  about JPEG behavior in general,
+- otherwise omit HDR-specific prefixes entirely when the surrounding type or
+  module already makes the HDR context obvious,
+- avoid introducing new public API names that use `UltraHdr` / `ultra_hdr`
+  unless there is a very strong compatibility reason.
+
+This is a naming cleanup goal for the stable API surface, not a requirement to
+force the internal implementation to mirror the same vocabulary immediately.
+
 #### Consistent operation verbs
 
 The verb set should be strict and documented:

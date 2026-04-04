@@ -90,6 +90,7 @@ The main public API lives at the crate root:
   - `Inspection`
   - `DecodeOptions`
   - `GainMapChannels`
+  - `GainMapScale`
   - `ComputeGainMapOptions`
   - `PreparePrimaryOptions`
   - `PreparedPrimary`

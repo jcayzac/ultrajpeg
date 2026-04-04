@@ -8,9 +8,9 @@ use ultrahdr_core::{
 };
 use ultrajpeg::{
     ColorMetadata, CompressionEffort, ComputeGainMapOptions, DecodeOptions, EncodeOptions, Encoder,
-    GainMapBundle, GainMapChannels, GainMapMetadataSource, MetadataLocation, PrimaryMetadata,
-    UltraHdrEncodeOptions, compute_gain_map, decode, decode_with_options, encode_ultra_hdr, icc,
-    inspect,
+    GainMapBundle, GainMapChannels, GainMapMetadataSource, GainMapScale, MetadataLocation,
+    PrimaryMetadata, UltraHdrEncodeOptions, UltraHdrMetadataEmission, compute_gain_map, decode,
+    decode_with_options, encode_ultra_hdr, icc, inspect,
 };
 
 const XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
@@ -333,6 +333,141 @@ fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
 }
 
 #[test]
+fn ultra_hdr_metadata_emission_defaults_enable_all_paths() {
+    assert_eq!(
+        UltraHdrMetadataEmission::default(),
+        UltraHdrMetadataEmission {
+            emit_primary_container_xmp: true,
+            emit_gain_map_xmp: true,
+            emit_iso_21496_1: true,
+        }
+    );
+    assert_eq!(
+        EncodeOptions::default().ultra_hdr_metadata_emission,
+        UltraHdrMetadataEmission::default()
+    );
+}
+
+#[test]
+fn encoder_can_emit_xmp_only_ultra_hdr_metadata_for_testing() {
+    let encoded = Encoder::new(EncodeOptions {
+        ultra_hdr_metadata_emission: UltraHdrMetadataEmission {
+            emit_primary_container_xmp: true,
+            emit_gain_map_xmp: true,
+            emit_iso_21496_1: false,
+        },
+        gain_map: Some(GainMapBundle {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+            compression: CompressionEffort::Balanced,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+    let codestreams = split_embedded_jpegs(&encoded);
+
+    assert_eq!(codestreams.len(), 2);
+    assert!(xmp_payload(codestreams[0]).is_some());
+    assert!(xmp_payload(codestreams[1]).is_some());
+    assert!(iso_payload(codestreams[0]).is_none());
+    assert!(iso_payload(codestreams[1]).is_none());
+
+    let ultra_hdr = decode(&encoded).unwrap().ultra_hdr.unwrap();
+    assert!(ultra_hdr.xmp.is_some());
+    assert!(ultra_hdr.iso_21496_1.is_none());
+    assert_eq!(ultra_hdr.xmp_location, Some(MetadataLocation::GainMap));
+    assert_eq!(
+        ultra_hdr.gain_map_metadata_source,
+        Some(GainMapMetadataSource::Xmp)
+    );
+}
+
+#[test]
+fn encoder_can_bundle_gain_map_without_any_ultra_hdr_metadata_for_testing() {
+    let encoded = Encoder::new(EncodeOptions {
+        ultra_hdr_metadata_emission: UltraHdrMetadataEmission {
+            emit_primary_container_xmp: false,
+            emit_gain_map_xmp: false,
+            emit_iso_21496_1: false,
+        },
+        gain_map: Some(GainMapBundle {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+            compression: CompressionEffort::Balanced,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+    let codestreams = split_embedded_jpegs(&encoded);
+
+    assert_eq!(codestreams.len(), 2);
+    assert!(xmp_payload(codestreams[0]).is_none());
+    assert!(xmp_payload(codestreams[1]).is_none());
+    assert!(iso_payload(codestreams[0]).is_none());
+    assert!(iso_payload(codestreams[1]).is_none());
+
+    let inspected = inspect(&encoded).unwrap();
+    assert!(inspected.gain_map_jpeg_len.is_some());
+    assert!(inspected.ultra_hdr.is_none());
+
+    let decoded = decode(&encoded).unwrap();
+    assert!(decoded.gain_map.is_some());
+    assert!(decoded.ultra_hdr.is_none());
+}
+
+#[test]
+fn encoder_can_emit_iso_only_ultra_hdr_metadata_for_testing() {
+    let encoded = Encoder::new(EncodeOptions {
+        ultra_hdr_metadata_emission: UltraHdrMetadataEmission {
+            emit_primary_container_xmp: false,
+            emit_gain_map_xmp: false,
+            emit_iso_21496_1: true,
+        },
+        gain_map: Some(GainMapBundle {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+            compression: CompressionEffort::Balanced,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+    let codestreams = split_embedded_jpegs(&encoded);
+
+    assert_eq!(codestreams.len(), 2);
+    assert!(xmp_payload(codestreams[0]).is_none());
+    assert!(xmp_payload(codestreams[1]).is_none());
+    assert_eq!(
+        iso_payload(codestreams[0]),
+        Some(vec![0x00, 0x00, 0x00, 0x00])
+    );
+    assert_eq!(
+        iso_payload(codestreams[1]),
+        Some(canonical_sample_gain_map_iso_payload())
+    );
+
+    let ultra_hdr = decode(&encoded).unwrap().ultra_hdr.unwrap();
+    assert!(ultra_hdr.xmp.is_none());
+    assert!(ultra_hdr.iso_21496_1.is_some());
+    assert_eq!(
+        ultra_hdr.iso_21496_1_location,
+        Some(MetadataLocation::GainMap)
+    );
+    assert_eq!(
+        ultra_hdr.gain_map_metadata_source,
+        Some(GainMapMetadataSource::Iso21496_1)
+    );
+}
+
+#[test]
 fn decodes_plain_jpeg_without_gain_map() {
     let encoded = Encoder::new(EncodeOptions::default())
         .encode(&sample_primary())
@@ -490,7 +625,12 @@ fn gain_map_packaging_allows_missing_icc_for_non_display_p3_primary() {
 }
 
 #[test]
-fn compute_gain_map_defaults_to_single_channel() {
+fn compute_gain_map_defaults_to_single_channel_and_default_scale() {
+    assert_eq!(
+        ComputeGainMapOptions::default().scale,
+        GainMapScale::Default
+    );
+
     let computed = compute_gain_map(
         &sample_hdr(),
         &sample_primary(),
@@ -499,9 +639,41 @@ fn compute_gain_map_defaults_to_single_channel() {
     .unwrap();
 
     assert_eq!(computed.image.format, PixelFormat::Gray8);
+    assert_eq!(computed.image.width, 2);
+    assert_eq!(computed.image.height, 2);
+    assert_eq!(computed.metadata.gamma, [1.0; 3]);
+}
+
+#[test]
+fn compute_gain_map_full_scale_preserves_primary_dimensions() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions {
+            scale: GainMapScale::Full,
+            ..ComputeGainMapOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(computed.image.width, 4);
+    assert_eq!(computed.image.height, 4);
+}
+
+#[test]
+fn compute_gain_map_smallest_scale_reduces_to_quarter_resolution() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions {
+            scale: GainMapScale::Smallest,
+            ..ComputeGainMapOptions::default()
+        },
+    )
+    .unwrap();
+
     assert_eq!(computed.image.width, 1);
     assert_eq!(computed.image.height, 1);
-    assert_eq!(computed.metadata.gamma, [1.0; 3]);
 }
 
 #[test]
@@ -511,14 +683,15 @@ fn compute_gain_map_multichannel_requires_explicit_opt_in() {
         &sample_primary(),
         &ComputeGainMapOptions {
             channels: GainMapChannels::Multi,
+            ..ComputeGainMapOptions::default()
         },
     )
     .unwrap();
 
     assert_eq!(computed.image.format, PixelFormat::Rgb8);
-    assert_eq!(computed.image.width, 1);
-    assert_eq!(computed.image.height, 1);
-    assert_eq!(computed.image.data.len(), 3);
+    assert_eq!(computed.image.width, 2);
+    assert_eq!(computed.image.height, 2);
+    assert_eq!(computed.image.data.len(), 12);
 }
 
 #[test]
@@ -852,6 +1025,10 @@ fn ultra_hdr_defaults_preserve_regular_jpeg_defaults() {
     assert_eq!(
         options.primary_metadata.color.icc_profile.as_deref(),
         Some(icc::display_p3())
+    );
+    assert_eq!(
+        options.ultra_hdr_metadata_emission,
+        UltraHdrMetadataEmission::default()
     );
     assert!(options.gain_map.is_none());
 }

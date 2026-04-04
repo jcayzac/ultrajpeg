@@ -144,14 +144,18 @@ fn assemble_container_impl(
     let mut insert_at = metadata_insert_index(&jpeg);
 
     if let Some(ultra_hdr_metadata) = ultra_hdr_metadata {
-        let primary_xmp = gain_map_jpeg
-            .as_ref()
-            .map(|gain_map_jpeg| container_xmp_for_gain_map_length(gain_map_jpeg.len()));
+        let primary_xmp = if ultra_hdr_metadata.emit_primary_container_xmp {
+            gain_map_jpeg
+                .as_ref()
+                .map(|gain_map_jpeg| container_xmp_for_gain_map_length(gain_map_jpeg.len()))
+        } else {
+            None
+        };
         insert_at = insert_xmp_segment(&mut jpeg, insert_at, primary_xmp.as_deref());
         insert_at = insert_iso_segment(
             &mut jpeg,
             insert_at,
-            Some(ultra_hdr_metadata.primary_iso_21496_1.as_slice()),
+            ultra_hdr_metadata.primary_iso_21496_1.as_deref(),
         );
     }
 
@@ -552,11 +556,15 @@ fn rewrite_gain_map_jpeg(
     remove_embedded_metadata_segments(&mut jpeg);
 
     let mut insert_at = metadata_insert_index(&jpeg);
-    insert_at = insert_xmp_segment(&mut jpeg, insert_at, Some(&ultra_hdr_metadata.gain_map_xmp));
+    insert_at = insert_xmp_segment(
+        &mut jpeg,
+        insert_at,
+        ultra_hdr_metadata.gain_map_xmp.as_deref(),
+    );
     insert_iso_segment(
         &mut jpeg,
         insert_at,
-        Some(ultra_hdr_metadata.gain_map_iso_21496_1.as_slice()),
+        ultra_hdr_metadata.gain_map_iso_21496_1.as_deref(),
     );
 
     Ok(jpeg.encoder().bytes().to_vec())

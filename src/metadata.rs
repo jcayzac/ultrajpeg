@@ -2,6 +2,7 @@ use crate::{
     error::{Error, Result},
     types::{
         ColorMetadata, GainMapMetadataSource, MetadataLocation, ParsedGainMapXmp, UltraHdrMetadata,
+        UltraHdrMetadataEmission,
     },
 };
 use ultrahdr_core::{
@@ -28,18 +29,29 @@ const LEGACY_ISO_FLAG_BACKWARD_DIRECTION: u8 = 0x04;
 const ISO_PREFERRED_DENOMINATOR_SHIFT: u32 = 28;
 
 pub(crate) struct EncodedUltraHdrMetadata {
-    pub(crate) primary_iso_21496_1: Vec<u8>,
-    pub(crate) gain_map_xmp: String,
-    pub(crate) gain_map_iso_21496_1: Vec<u8>,
+    pub(crate) emit_primary_container_xmp: bool,
+    pub(crate) primary_iso_21496_1: Option<Vec<u8>>,
+    pub(crate) gain_map_xmp: Option<String>,
+    pub(crate) gain_map_iso_21496_1: Option<Vec<u8>>,
 }
 
 pub(crate) fn build_ultra_hdr_metadata(
     metadata: &GainMapMetadata,
+    emission: UltraHdrMetadataEmission,
 ) -> Result<EncodedUltraHdrMetadata> {
     Ok(EncodedUltraHdrMetadata {
-        primary_iso_21496_1: serialize_primary_iso_21496_1(),
-        gain_map_xmp: generate_gain_map_xmp(metadata),
-        gain_map_iso_21496_1: serialize_gain_map_iso_21496_1(metadata)?,
+        emit_primary_container_xmp: emission.emit_primary_container_xmp,
+        primary_iso_21496_1: emission
+            .emit_iso_21496_1
+            .then(serialize_primary_iso_21496_1),
+        gain_map_xmp: emission
+            .emit_gain_map_xmp
+            .then(|| generate_gain_map_xmp(metadata)),
+        gain_map_iso_21496_1: if emission.emit_iso_21496_1 {
+            Some(serialize_gain_map_iso_21496_1(metadata)?)
+        } else {
+            None
+        },
     })
 }
 
