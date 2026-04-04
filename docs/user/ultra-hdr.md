@@ -52,6 +52,28 @@ Those entry points are intentionally raw:
 JPEG's four-byte version-only ISO APP2 block is structural only and returns an
 error if passed to that raw parser directly.
 
+## Gain-Map Computation Scale
+
+`ComputeGainMapOptions` exposes two independent knobs:
+
+- `channels`, which controls whether the computed gain map is single-channel or
+  multichannel
+- `scale`, which controls gain-map resolution relative to the primary image
+
+The supported `GainMapScale` values are:
+
+- `GainMapScale::Full`, which keeps full primary-image resolution and is
+  recommended for best quality
+- `GainMapScale::Default`, which computes the gain map at half width and height
+  and is the crate's default
+- `GainMapScale::Smallest`, which computes the gain map at quarter width and
+  height and matches the most aggressive Android Ultra HDR-style recommendation,
+  but may noticeably reduce quality
+
+The default `compute_gain_map(...)` path therefore computes a single-channel
+gain map at half primary-image resolution unless the caller opts into a
+different channel layout or scale.
+
 ## Container Structure Inspection
 
 `inspect_container_layout(...)` exposes:

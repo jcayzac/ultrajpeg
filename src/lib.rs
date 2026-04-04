@@ -51,6 +51,8 @@ pub use types::GainMapBundle;
 pub use types::GainMapChannels;
 /// Representation from which effective gain-map metadata was parsed.
 pub use types::GainMapMetadataSource;
+/// Supported spatial scales for computed gain maps.
+pub use types::GainMapScale;
 /// Structured gamut information recovered from explicit metadata or ICC data.
 pub use types::GamutInfo;
 /// Metadata-only inspection result.

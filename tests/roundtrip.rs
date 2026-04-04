@@ -8,9 +8,9 @@ use ultrahdr_core::{
 };
 use ultrajpeg::{
     ColorMetadata, CompressionEffort, ComputeGainMapOptions, DecodeOptions, EncodeOptions, Encoder,
-    GainMapBundle, GainMapChannels, GainMapMetadataSource, MetadataLocation, PrimaryMetadata,
-    UltraHdrEncodeOptions, UltraHdrMetadataEmission, compute_gain_map, decode, decode_with_options,
-    encode_ultra_hdr, icc, inspect,
+    GainMapBundle, GainMapChannels, GainMapMetadataSource, GainMapScale, MetadataLocation,
+    PrimaryMetadata, UltraHdrEncodeOptions, UltraHdrMetadataEmission, compute_gain_map, decode,
+    decode_with_options, encode_ultra_hdr, icc, inspect,
 };
 
 const XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
@@ -393,7 +393,10 @@ fn encoder_can_emit_iso_only_ultra_hdr_metadata_for_testing() {
     assert_eq!(codestreams.len(), 2);
     assert!(xmp_payload(codestreams[0]).is_none());
     assert!(xmp_payload(codestreams[1]).is_none());
-    assert_eq!(iso_payload(codestreams[0]), Some(vec![0x00, 0x00, 0x00, 0x00]));
+    assert_eq!(
+        iso_payload(codestreams[0]),
+        Some(vec![0x00, 0x00, 0x00, 0x00])
+    );
     assert_eq!(
         iso_payload(codestreams[1]),
         Some(canonical_sample_gain_map_iso_payload())
@@ -570,7 +573,12 @@ fn gain_map_packaging_allows_missing_icc_for_non_display_p3_primary() {
 }
 
 #[test]
-fn compute_gain_map_defaults_to_single_channel() {
+fn compute_gain_map_defaults_to_single_channel_and_default_scale() {
+    assert_eq!(
+        ComputeGainMapOptions::default().scale,
+        GainMapScale::Default
+    );
+
     let computed = compute_gain_map(
         &sample_hdr(),
         &sample_primary(),
@@ -579,9 +587,41 @@ fn compute_gain_map_defaults_to_single_channel() {
     .unwrap();
 
     assert_eq!(computed.image.format, PixelFormat::Gray8);
+    assert_eq!(computed.image.width, 2);
+    assert_eq!(computed.image.height, 2);
+    assert_eq!(computed.metadata.gamma, [1.0; 3]);
+}
+
+#[test]
+fn compute_gain_map_full_scale_preserves_primary_dimensions() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions {
+            scale: GainMapScale::Full,
+            ..ComputeGainMapOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(computed.image.width, 4);
+    assert_eq!(computed.image.height, 4);
+}
+
+#[test]
+fn compute_gain_map_smallest_scale_reduces_to_quarter_resolution() {
+    let computed = compute_gain_map(
+        &sample_hdr(),
+        &sample_primary(),
+        &ComputeGainMapOptions {
+            scale: GainMapScale::Smallest,
+            ..ComputeGainMapOptions::default()
+        },
+    )
+    .unwrap();
+
     assert_eq!(computed.image.width, 1);
     assert_eq!(computed.image.height, 1);
-    assert_eq!(computed.metadata.gamma, [1.0; 3]);
 }
 
 #[test]
@@ -597,9 +637,9 @@ fn compute_gain_map_multichannel_requires_explicit_opt_in() {
     .unwrap();
 
     assert_eq!(computed.image.format, PixelFormat::Rgb8);
-    assert_eq!(computed.image.width, 1);
-    assert_eq!(computed.image.height, 1);
-    assert_eq!(computed.image.data.len(), 3);
+    assert_eq!(computed.image.width, 2);
+    assert_eq!(computed.image.height, 2);
+    assert_eq!(computed.image.data.len(), 12);
 }
 
 #[test]

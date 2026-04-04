@@ -2,7 +2,7 @@ use crate::{
     Error, Result,
     types::{
         ColorMetadata, ComputeGainMapOptions, ComputedGainMap, EncodeOptions, GainMapBundle,
-        GainMapChannels, PreparePrimaryOptions, PreparedPrimary, PrimaryMetadata,
+        GainMapChannels, GainMapScale, PreparePrimaryOptions, PreparedPrimary, PrimaryMetadata,
         UltraHdrEncodeOptions,
     },
 };
@@ -37,7 +37,11 @@ pub(crate) fn compute_gain_map_impl(
 ) -> Result<ComputedGainMap> {
     let config = GainMapConfig {
         multi_channel: matches!(options.channels, GainMapChannels::Multi),
-        scale_factor: options.scale_factor,
+        scale_factor: match options.scale {
+            GainMapScale::Full => 1,
+            GainMapScale::Default => 2,
+            GainMapScale::Smallest => 4,
+        },
         ..GainMapConfig::default()
     };
 

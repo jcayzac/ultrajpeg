@@ -395,6 +395,28 @@ pub enum GainMapChannels {
     Multi,
 }
 
+/// Supported spatial scales for computed gain maps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GainMapScale {
+    /// Compute the gain map at full primary-image resolution.
+    ///
+    /// This maps to a scale factor of `1` and is recommended for best
+    /// quality.
+    Full,
+    /// Compute the gain map at half primary-image width and height.
+    ///
+    /// This maps to a scale factor of `2`, matches the default 1:2 scale used
+    /// by Adaptive HEIC images, and is often a good compromise between quality
+    /// and size.
+    #[default]
+    Default,
+    /// Compute the gain map at quarter primary-image width and height.
+    ///
+    /// This maps to a scale factor of `4`, aligns with Android Ultra HDR's
+    /// most aggressive recommendation, and may noticeably reduce quality.
+    Smallest,
+}
+
 /// Options for gain-map computation from HDR and SDR primary images.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComputeGainMapOptions {
@@ -402,14 +424,10 @@ pub struct ComputeGainMapOptions {
     ///
     /// The default is [`GainMapChannels::Single`].
     pub channels: GainMapChannels,
-    /// Spatial downscale factor for the computed gain map.
+    /// Spatial scale for the computed gain map.
     ///
-    /// `1` keeps the gain map at full primary-image resolution.
-    /// `2` produces a gain map at half width/height.
-    /// `4` produces a gain map at quarter width/height.
-    ///
-    /// Values smaller than `1` are clamped by the underlying gain-map core.
-    pub scale_factor: u8,
+    /// The default is [`GainMapScale::Default`].
+    pub scale: GainMapScale,
 }
 
 /// Result of computing an Ultra HDR gain map from HDR and SDR images.
@@ -602,7 +620,7 @@ impl Default for ComputeGainMapOptions {
     fn default() -> Self {
         Self {
             channels: GainMapChannels::Single,
-            scale_factor: 4,
+            scale: GainMapScale::Default,
         }
     }
 }
