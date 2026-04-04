@@ -365,16 +365,28 @@ pub struct GainMapBundle {
 /// interoperability testing or debugging while still bundling the gain-map
 /// JPEG itself.
 ///
+/// This is an advanced testing/debugging control rather than the normal
+/// packaging path. Production Ultra HDR output should usually leave every flag
+/// enabled.
+///
 /// Omitting metadata here does not remove the gain-map image. That remains
-/// controlled by whether [`EncodeOptions::gain_map`] is `Some`.
+/// controlled by whether [`EncodeOptions::gain_map`] is `Some`. When every
+/// flag is `false`, the secondary gain-map JPEG is still bundled, but the
+/// resulting container no longer carries effective Ultra HDR metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UltraHdrMetadataEmission {
     /// Whether to emit the primary JPEG's container/directory XMP.
     ///
     /// When enabled, this is the primary-side XMP that advertises the bundled
     /// gain-map codestream and declares the `hdrgm` namespace/version.
+    ///
+    /// Disabling this leaves the MPF-gain-map bundle intact; it only suppresses
+    /// the primary-side XMP advertisement.
     pub emit_primary_container_xmp: bool,
     /// Whether to emit `hdrgm:*` XMP on the gain-map JPEG.
+    ///
+    /// This controls only the gain-map JPEG's metadata payload, not the
+    /// presence of the gain-map JPEG codestream itself.
     pub emit_gain_map_xmp: bool,
     /// Whether to emit ISO 21496-1 APP2 payloads.
     ///
@@ -382,6 +394,8 @@ pub struct UltraHdrMetadataEmission {
     ///
     /// - the primary JPEG's four-byte version-only structural ISO block
     /// - the gain-map JPEG's canonical ISO 21496-1 metadata payload
+    ///
+    /// When disabled, both ISO payloads are omitted together.
     pub emit_iso_21496_1: bool,
 }
 
@@ -534,8 +548,8 @@ pub struct EncodeOptions {
     /// bundled.
     ///
     /// The default emits all supported metadata paths. Use this only when a
-    /// caller intentionally wants an `XMP-only` or `ISO-only` output for
-    /// interoperability testing.
+    /// caller intentionally wants an `XMP-only`, `ISO-only`, or metadata-free
+    /// gain-map bundle for interoperability testing.
     pub ultra_hdr_metadata_emission: UltraHdrMetadataEmission,
     /// Optional gain-map image and metadata to bundle into an Ultra HDR
     /// container.

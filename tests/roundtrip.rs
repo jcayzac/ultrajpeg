@@ -333,6 +333,22 @@ fn encoder_splits_primary_container_xmp_and_gain_map_metadata_xmp() {
 }
 
 #[test]
+fn ultra_hdr_metadata_emission_defaults_enable_all_paths() {
+    assert_eq!(
+        UltraHdrMetadataEmission::default(),
+        UltraHdrMetadataEmission {
+            emit_primary_container_xmp: true,
+            emit_gain_map_xmp: true,
+            emit_iso_21496_1: true,
+        }
+    );
+    assert_eq!(
+        EncodeOptions::default().ultra_hdr_metadata_emission,
+        UltraHdrMetadataEmission::default()
+    );
+}
+
+#[test]
 fn encoder_can_emit_xmp_only_ultra_hdr_metadata_for_testing() {
     let encoded = Encoder::new(EncodeOptions {
         ultra_hdr_metadata_emission: UltraHdrMetadataEmission {
@@ -367,6 +383,42 @@ fn encoder_can_emit_xmp_only_ultra_hdr_metadata_for_testing() {
         ultra_hdr.gain_map_metadata_source,
         Some(GainMapMetadataSource::Xmp)
     );
+}
+
+#[test]
+fn encoder_can_bundle_gain_map_without_any_ultra_hdr_metadata_for_testing() {
+    let encoded = Encoder::new(EncodeOptions {
+        ultra_hdr_metadata_emission: UltraHdrMetadataEmission {
+            emit_primary_container_xmp: false,
+            emit_gain_map_xmp: false,
+            emit_iso_21496_1: false,
+        },
+        gain_map: Some(GainMapBundle {
+            image: sample_gain_map(),
+            metadata: sample_gain_map_metadata(),
+            quality: 80,
+            progressive: false,
+            compression: CompressionEffort::Balanced,
+        }),
+        ..EncodeOptions::ultra_hdr_defaults()
+    })
+    .encode(&sample_primary())
+    .unwrap();
+    let codestreams = split_embedded_jpegs(&encoded);
+
+    assert_eq!(codestreams.len(), 2);
+    assert!(xmp_payload(codestreams[0]).is_none());
+    assert!(xmp_payload(codestreams[1]).is_none());
+    assert!(iso_payload(codestreams[0]).is_none());
+    assert!(iso_payload(codestreams[1]).is_none());
+
+    let inspected = inspect(&encoded).unwrap();
+    assert!(inspected.gain_map_jpeg_len.is_some());
+    assert!(inspected.ultra_hdr.is_none());
+
+    let decoded = decode(&encoded).unwrap();
+    assert!(decoded.gain_map.is_some());
+    assert!(decoded.ultra_hdr.is_none());
 }
 
 #[test]

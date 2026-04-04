@@ -556,7 +556,11 @@ fn rewrite_gain_map_jpeg(
     remove_embedded_metadata_segments(&mut jpeg);
 
     let mut insert_at = metadata_insert_index(&jpeg);
-    insert_at = insert_xmp_segment(&mut jpeg, insert_at, ultra_hdr_metadata.gain_map_xmp.as_deref());
+    insert_at = insert_xmp_segment(
+        &mut jpeg,
+        insert_at,
+        ultra_hdr_metadata.gain_map_xmp.as_deref(),
+    );
     insert_iso_segment(
         &mut jpeg,
         insert_at,
